@@ -82,29 +82,95 @@ def n_air(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexT
 
 
 def n_sio2_sellmeier(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
-    """Fused silica (SiO2) Sellmeier + thermo-optic shift.
+    """Fused silica (SiO2) Sellmeier + thermo-optic shift + Mid-IR multiphonon k(lambda).
 
-    Source: Malitson, JOSA 55, 1205 (1965); Leviton & Frey (2006) dn/dT = 8.5e-6 K^-1.
+    Source: Malitson, JOSA 55, 1205 (1965); Leviton & Frey (2006) dn/dT = 8.5e-6 K^-1;
+    Kitamura, Pilon & Jonasz, Appl. Opt. 46, 8118 (2007) Mid-IR multiphonon onset > 3.6 um.
     """
     u = _check_wl(wavelength_m)
-    x = u * u
+    x = min(u, 6.8) ** 2
     n0 = math.sqrt(
         max(
             1.0
             + 0.6961663 * x / (x - 0.068043 ** 2)
             + 0.4079426 * x / (x - 0.1162414 ** 2)
             + 0.8974794 * x / (x - 9.896161 ** 2),
-            1.0,
+            1.02,
         )
     )
+    # Multiphonon absorption onset above ~3.6 um (critical for Mid-IR cladding selection)
+    k_mir = 0.0
+    if u > 3.60:
+        k_mir = float(min(1.8e-4 * math.exp((u - 3.60) / 0.42), 0.25))
     dn_dt = 8.5e-6
     n = n0 + dn_dt * (temperature_k - T_REF_K)
     return MaterialIndexTensor(
         nx=n, ny=n, nz=n,
+        kx=k_mir, ky=k_mir, kz=k_mir,
         dn_dt_per_k=dn_dt,
         n2_m2_per_w=2.6e-20,
-        validity_um=(0.21, 6.7),
-        source="Malitson JOSA 1965 + Leviton & Frey 2006 (dn/dT=8.5e-6 K^-1)",
+        validity_um=(0.21, 3.65),
+        source="Malitson JOSA 1965 + Kitamura Appl. Opt. 2007 (transparent 0.21-3.65 um; absorbs in Mid-IR)",
+        is_anisotropic=False,
+    )
+
+
+def n_caf2_fluoride(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """Calcium Fluoride (CaF2) UV-to-Mid-IR low-index substrate/cladding (0.15 - 9.5 um).
+
+    Source: Malitson, Appl. Opt. 2, 1103 (1963); Tropf, Opt. Eng. 34 (1995) dn/dT = -1.06e-5 K^-1.
+    """
+    u = min(max(_check_wl(wavelength_m), 0.15), 11.0)
+    x = u * u
+    n0 = math.sqrt(
+        max(
+            1.0
+            + 0.5675888 * x / (x - 0.050263605 ** 2)
+            + 0.4710914 * x / (x - 0.1003909 ** 2)
+            + 3.8484723 * x / (x - 34.649040 ** 2),
+            1.05,
+        )
+    )
+    dn_dt = -1.06e-5
+    n = n0 + dn_dt * (temperature_k - T_REF_K)
+    k_lwir = float(min(1e-4 * math.exp((u - 9.5) / 0.6), 0.1)) if u > 9.5 else 0.0
+    return MaterialIndexTensor(
+        nx=n, ny=n, nz=n,
+        kx=k_lwir, ky=k_lwir, kz=k_lwir,
+        dn_dt_per_k=dn_dt,
+        n2_m2_per_w=1.9e-20,
+        validity_um=(0.15, 9.5),
+        source="Malitson Appl. Opt. 1963 (CaF2 UV-to-Mid-IR cladding, 0.15-9.5 um)",
+        is_anisotropic=False,
+    )
+
+
+def n_mgf2_fluoride(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """Magnesium Fluoride (MgF2) UV-to-Mid-IR low-index cladding (0.14 - 7.5 um).
+
+    Source: Dodge, Appl. Opt. 23, 1980 (1984).
+    """
+    u = min(max(_check_wl(wavelength_m), 0.14), 9.0)
+    x = u * u
+    n0 = math.sqrt(
+        max(
+            1.0
+            + 0.48755108 * x / (x - 0.04338408 ** 2)
+            + 0.39875031 * x / (x - 0.09461442 ** 2)
+            + 2.3120353 * x / (x - 23.793604 ** 2),
+            1.05,
+        )
+    )
+    dn_dt = 1.9e-6
+    n = n0 + dn_dt * (temperature_k - T_REF_K)
+    k_lwir = float(min(1e-4 * math.exp((u - 7.5) / 0.5), 0.1)) if u > 7.5 else 0.0
+    return MaterialIndexTensor(
+        nx=n, ny=n, nz=n,
+        kx=k_lwir, ky=k_lwir, kz=k_lwir,
+        dn_dt_per_k=dn_dt,
+        n2_m2_per_w=1.0e-20,
+        validity_um=(0.14, 7.5),
+        source="Dodge Appl. Opt. 1984 (MgF2 UV-to-Mid-IR cladding, 0.14-7.5 um)",
         is_anisotropic=False,
     )
 
@@ -146,13 +212,17 @@ def n_si_crystalline(
     temperature_k: float = T_REF_K,
     fixed_1550_index: bool = False,
 ) -> MaterialIndexTensor:
-    """Crystalline Silicon (Si) dispersion & thermo-optic model.
+    """Crystalline Silicon (Si) dispersion, thermo-optic shift & interband absorption below 1.12 um.
 
-    Source: Salzberg & Villa, JOSA 47, 244 (1957); Cocorullo & Della Corte (1999)
-    dn/dT = 1.86e-4 K^-1; Bristow et al., APL 90, 191104 (2007) n2 = 4.5e-18 m^2/W.
+    Source: Salzberg & Villa, JOSA 47, 244 (1957); Green, Sol. Energy Mater. 92, 1305 (2008)
+    visible/VNIR interband k(lambda); Cocorullo & Della Corte (1999) dn/dT = 1.86e-4 K^-1.
     """
     u = _check_wl(wavelength_m)
     dn_dt = 1.86e-4
+    k_ib = 0.0
+    if u < 1.12:
+        # Realistic indirect-to-direct interband absorption below 1.12 eV bandgap
+        k_ib = float(min(1.5e-5 * math.exp((1.12 - u) / 0.068), 0.35))
     if fixed_1550_index:
         n = 3.476 + dn_dt * (temperature_k - T_REF_K)
     else:
@@ -163,14 +233,18 @@ def n_si_crystalline(
             + 0.0030434748 * x / (x - 1.13475115 ** 2)
             + 1.54133408 * x / (x - 1104.0 ** 2)
         )
+        if u < 1.12:
+            # Normal dispersion rise into VNIR/Visible (Green 2008: n~3.71@780nm, ~4.15@532nm)
+            n0 += 0.52 * ((1.12 / max(u, 0.42)) ** 1.35 - 1.0)
         n = n0 + dn_dt * (temperature_k - T_REF_K)
     return MaterialIndexTensor(
         nx=n, ny=n, nz=n,
+        kx=k_ib, ky=k_ib, kz=k_ib,
         dn_dt_per_k=dn_dt,
         n2_m2_per_w=4.5e-18,
         crystal_symmetry="cubic_m3m",
-        validity_um=(1.15, 11.0),
-        source="Salzberg & Villa JOSA 1957 + Cocorullo 1999 (dn/dT=1.86e-4 K^-1)",
+        validity_um=(1.15, 8.5),
+        source="Salzberg & Villa JOSA 1957 + Green 2008 + Cocorullo 1999 (transparent 1.15-8.5 um)",
         is_anisotropic=False,
     )
 
@@ -180,42 +254,48 @@ def n_asi_hydrogenated(wavelength_m: float, temperature_k: float = T_REF_K) -> M
 
     Source: Della Corte et al., JAP 88, 7115 (2000); Kuyken et al., Opt. Express (2011).
     """
-    u = max(_check_wl(wavelength_m), 1.20)
+    raw_u = _check_wl(wavelength_m)
+    u = max(raw_u, 0.85)
     x = u * u
     n0 = math.sqrt(1.0 + 10.90 * x / (x - 0.365 ** 2))
+    k_ib = float(min(2.0e-4 * math.exp((0.85 - raw_u) / 0.06), 0.40)) if raw_u < 0.85 else 0.0
     dn_dt = 2.30e-4
     n = n0 + dn_dt * (temperature_k - T_REF_K)
     return MaterialIndexTensor(
         nx=n, ny=n, nz=n,
+        kx=k_ib, ky=k_ib, kz=k_ib,
         dn_dt_per_k=dn_dt,
         n2_m2_per_w=1.3e-17,
-        validity_um=(1.25, 5.5),
+        validity_um=(0.95, 5.5),
         source="PECVD a-Si:H Cauchy/Sellmeier (Della Corte 2000; dn/dT=2.3e-4 K^-1)",
         is_anisotropic=False,
     )
 
 
 def n_ge_crystalline(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
-    """Crystalline Germanium (Ge) Mid-IR waveguide dispersion.
+    """Crystalline Germanium (Ge) Mid-IR waveguide dispersion (transparent 2.0 - 14.0 um).
 
-    Source: Barnes & Piltch, JOSA 69, 178 (1979) (valid 2.0 - 14.0 um).
+    Source: Barnes & Piltch, JOSA 69, 178 (1979).
     """
-    u = max(_check_wl(wavelength_m), 1.95)
+    raw_u = _check_wl(wavelength_m)
+    u = max(raw_u, 1.95)
     x = u * u
     n0 = math.sqrt(
         9.28156
         + 6.72880 * x / (x - 0.44105)
         + 0.21307 * x / (x - 3870.1)
     )
+    k_ib = float(min(3.0e-4 * math.exp((1.90 - raw_u) / 0.09), 0.45)) if raw_u < 1.90 else 0.0
     dn_dt = 4.02e-4
     n = n0 + dn_dt * (temperature_k - T_REF_K)
     return MaterialIndexTensor(
         nx=n, ny=n, nz=n,
+        kx=k_ib, ky=k_ib, kz=k_ib,
         dn_dt_per_k=dn_dt,
         n2_m2_per_w=2.5e-17,
         crystal_symmetry="cubic_m3m",
         validity_um=(2.0, 14.0),
-        source="Barnes & Piltch JOSA 1979 (Crystalline Ge Mid-IR)",
+        source="Barnes & Piltch JOSA 1979 (Crystalline Ge Mid-IR, transparent 2.0-14.0 um)",
         is_anisotropic=False,
     )
 
@@ -546,137 +626,375 @@ def n_gsst_pcm(wavelength_m: float, state: str = "amorphous") -> MaterialIndexTe
 
 
 # ==============================================================================
-# 7. Unified Material Catalog & Lookup API for UI / Scripting
+# 6B. Visible / VNIR / Broadband Materials (TiO2, Ta2O5, GaN, Diamond)
 # ==============================================================================
+
+def n_tio2_ald(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """ALD / Sputtered Anatase Titanium Dioxide (TiO2) for Visible/VNIR/NIR (0.40 - 4.5 um).
+
+    Source: Siefke et al., Adv. Opt. Mater. 4, 1780 (2016); Raghunathan et al.
+    dn/dT = -1.0e-4 K^-1 (negative thermo-optic coefficient, useful for athermal PICs!).
+    """
+    raw_u = _check_wl(wavelength_m)
+    u = max(raw_u, 0.39)
+    x = u * u
+    n0 = math.sqrt(max(1.0 + 4.022 * x / (x - 0.244 ** 2), 1.5))
+    dn_dt = -1.0e-4
+    n = n0 + dn_dt * (temperature_k - T_REF_K)
+    k_uv = float(min(1e-3 * math.exp((0.39 - raw_u) / 0.02), 0.3)) if raw_u < 0.39 else 0.0
+    return MaterialIndexTensor(
+        nx=n, ny=n, nz=n,
+        kx=k_uv, ky=k_uv, kz=k_uv,
+        dn_dt_per_k=dn_dt,
+        n2_m2_per_w=9.4e-19,
+        validity_um=(0.40, 4.5),
+        source="Siefke Adv. Opt. Mater. 2016 (ALD TiO2 Visible/NIR, dn/dT=-1.0e-4 K^-1)",
+        is_anisotropic=False,
+    )
+
+
+def n_ta2o5_tantala(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """Sputtered Tantalum Pentoxide (Ta2O5 / Tantala) ultra-low-loss Visible/NIR waveguide.
+
+    Source: Bright et al., J. Appl. Phys. 114, 083515 (2013); Jung et al., Optica (2021).
+    """
+    raw_u = _check_wl(wavelength_m)
+    u = max(raw_u, 0.35)
+    x = u * u
+    n0 = math.sqrt(max(1.0 + 3.276 * x / (x - 0.168 ** 2), 1.4))
+    dn_dt = 0.88e-5
+    n = n0 + dn_dt * (temperature_k - T_REF_K)
+    return MaterialIndexTensor(
+        nx=n, ny=n, nz=n,
+        dn_dt_per_k=dn_dt,
+        n2_m2_per_w=7.2e-19,
+        validity_um=(0.38, 4.5),
+        source="Bright JAP 2013 / Jung Optica 2021 (Ta2O5 Visible-to-MIR low-loss waveguide)",
+        is_anisotropic=False,
+    )
+
+
+def n_gan_wurtzite(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """Wurtzite c-axis Gallium Nitride (GaN) uniaxial `[no, ne, no]` (Visible 0.39 um to MIR 6.5 um).
+
+    Source: Barker & Ilegems, Phys. Rev. B 7, 743 (1973); Watanabe et al., JAP (2008).
+    """
+    raw_u = _check_wl(wavelength_m)
+    u = max(raw_u, 0.38)
+    x = u * u
+    no = math.sqrt(max(3.60 + 1.75 * x / (x - 0.256 ** 2), 1.5))
+    ne = math.sqrt(max(3.85 + 1.80 * x / (x - 0.262 ** 2), 1.5))
+    dn_dt = 6.8e-5
+    dt = temperature_k - T_REF_K
+    no += dn_dt * dt
+    ne += dn_dt * dt
+    return MaterialIndexTensor(
+        nx=no, ny=ne, nz=no,
+        dn_dt_per_k=dn_dt,
+        r33_pm_per_v=1.9,
+        r13_pm_per_v=0.6,
+        n2_m2_per_w=1.4e-18,
+        crystal_symmetry="wurtzite_6mm_c_vertical",
+        validity_um=(0.39, 6.5),
+        source="Barker & Ilegems PRB 1973 (Wurtzite GaN Visible-to-Mid-IR [no, ne, no])",
+        is_anisotropic=True,
+    )
+
+
+def n_diamond_cvd(wavelength_m: float, temperature_k: float = T_REF_K) -> MaterialIndexTensor:
+    """Single-Crystal CVD Diamond (UV 0.24 um -> Visible NV/SiV -> Mid-IR/LWIR 20 um).
+
+    Source: Peter, Z. Phys. 15, 358 (1923); Hausmann et al., Nat. Nanotechnol. 9 (2014).
+    """
+    u = max(_check_wl(wavelength_m), 0.24)
+    x = u * u
+    n0 = math.sqrt(
+        max(
+            1.0
+            + 0.3306 * x / (x - 0.1750 ** 2)
+            + 4.3356 * x / (x - 0.1060 ** 2),
+            1.5,
+        )
+    )
+    dn_dt = 1.0e-5
+    n = n0 + dn_dt * (temperature_k - T_REF_K)
+    return MaterialIndexTensor(
+        nx=n, ny=n, nz=n,
+        dn_dt_per_k=dn_dt,
+        n2_m2_per_w=1.3e-19,
+        crystal_symmetry="cubic_Fd3m",
+        validity_um=(0.24, 20.0),
+        source="Peter 1923 / Hausmann Nat. Nanotechnol. 2014 (CVD Diamond UV-Visible-MIR)",
+        is_anisotropic=False,
+    )
+
+
+# ==============================================================================
+# 7. Unified 24-Material Catalog & Multi-Waveband Presets (Visible -> 1310 -> 1550 -> MIR)
+# ==============================================================================
+
+WAVEBAND_PRESETS: dict[str, dict] = {
+    "visible_532": {
+        "label": "Visible Green (532 nm)",
+        "wavelength_nm": 532.0,
+        "recommended_cores": ["Si3N4", "TiO2", "Ta2O5", "AlN", "GaN", "Diamond", "LN_Xcut"],
+        "recommended_clads": ["SiO2", "Al2O3", "CaF2", "Air"],
+    },
+    "vnir_780": {
+        "label": "VNIR / Quantum Rb & Color Centers (780 nm)",
+        "wavelength_nm": 780.0,
+        "recommended_cores": ["Si3N4", "4H-SiC", "AlN", "TiO2", "Ta2O5", "LN_Xcut", "Diamond"],
+        "recommended_clads": ["SiO2", "Al2O3", "Air"],
+    },
+    "oband_1310": {
+        "label": "Datacom O-Band (1310 nm)",
+        "wavelength_nm": 1310.0,
+        "recommended_cores": ["Si", "Si3N4", "LN_Xcut", "4H-SiC", "AlN", "ScAlN_20", "a-Si"],
+        "recommended_clads": ["SiO2", "Air"],
+    },
+    "cband_1550": {
+        "label": "Telecom C-Band (1550 nm)",
+        "wavelength_nm": 1550.0,
+        "recommended_cores": ["Si", "Si3N4", "4H-SiC", "LN_Xcut", "LN_Zcut", "AlN", "ScAlN_20"],
+        "recommended_clads": ["SiO2", "Air"],
+    },
+    "swir_2000": {
+        "label": "2-um SWIR / Thulium Band (2000 nm)",
+        "wavelength_nm": 2000.0,
+        "recommended_cores": ["Si", "Si3N4", "Ge", "4H-SiC", "AlN", "LN_Xcut", "GaN"],
+        "recommended_clads": ["SiO2", "Al2O3", "CaF2", "Air"],
+    },
+    "midir_4200": {
+        "label": "Mid-IR Gas Sensing CO2/CH4 (4200 nm)",
+        "wavelength_nm": 4200.0,
+        "recommended_cores": ["Ge", "Si", "Si3N4", "AlN", "GaN", "4H-SiC", "Diamond", "GSST_amorphous"],
+        "recommended_clads": ["CaF2", "MgF2", "Al2O3", "Si", "Air"],
+    },
+    "lwir_7500": {
+        "label": "Long-Wave Mid-IR Fingerprint (7500 nm)",
+        "wavelength_nm": 7500.0,
+        "recommended_cores": ["Ge", "Diamond"],
+        "recommended_clads": ["Si", "CaF2", "Air"],
+    },
+}
+
 
 MATERIAL_CATALOG: dict[str, dict] = {
     "Si": {
-        "name": "Silicon (c-Si, SOI)",
+        "name": "Silicon (c-Si, O/C-band to MIR 1.15-8.5 um)",
         "category": "Group IV",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 1.5,
         "fn": lambda wl, t=T_REF_K: n_si_crystalline(wl, t, fixed_1550_index=False),
     },
     "a-Si": {
-        "name": "Amorphous Silicon (a-Si:H)",
+        "name": "Amorphous Silicon (a-Si:H, 0.95-5.5 um)",
         "category": "Group IV",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 3.0,
         "fn": n_asi_hydrogenated,
     },
+    "Ge": {
+        "name": "Germanium (c-Ge Mid-IR, 2.0-14.0 um)",
+        "category": "Group IV",
+        "default_band_nm": 4200.0,
+        "typical_loss_db_cm": 2.0,
+        "fn": n_ge_crystalline,
+    },
     "Si3N4": {
-        "name": "Silicon Nitride (LPCVD Si3N4)",
+        "name": "Silicon Nitride (LPCVD Si3N4, Vis-MIR 0.31-5.0 um)",
         "category": "Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.15,
         "fn": n_sin_lpcvd,
     },
     "SiRich_SiNx": {
-        "name": "Silicon-Rich Nitride (SRN SiNx)",
+        "name": "Silicon-Rich Nitride (SRN SiNx, 0.60-5.0 um)",
         "category": "Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.80,
         "fn": n_sirich_sinx,
     },
+    "TiO2": {
+        "name": "Titanium Dioxide (ALD TiO2, Visible-NIR 0.40-4.5 um)",
+        "category": "Visible Oxide",
+        "default_band_nm": 633.0,
+        "typical_loss_db_cm": 0.80,
+        "fn": n_tio2_ald,
+    },
+    "Ta2O5": {
+        "name": "Tantalum Pentoxide (Ta2O5, Visible-NIR 0.38-4.5 um)",
+        "category": "Visible Oxide",
+        "default_band_nm": 780.0,
+        "typical_loss_db_cm": 0.25,
+        "fn": n_ta2o5_tantala,
+    },
     "4H-SiC": {
-        "name": "4H-Silicon Carbide (4H-SiC c-cut)",
+        "name": "4H-Silicon Carbide (4H-SiC c-cut, Vis-MIR 0.40-5.2 um)",
         "category": "Carbide",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.30,
         "fn": n_4h_sic_anisotropic,
     },
     "3C-SiC": {
-        "name": "3C-Silicon Carbide (Cubic 3C-SiC)",
+        "name": "3C-Silicon Carbide (Cubic 3C-SiC, 0.48-5.0 um)",
         "category": "Carbide",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.80,
         "fn": n_3c_sic,
     },
+    "Diamond": {
+        "name": "CVD Diamond (UV-Visible NV/SiV to LWIR 0.24-20 um)",
+        "category": "Carbon/Quantum",
+        "default_band_nm": 737.0,
+        "typical_loss_db_cm": 0.35,
+        "fn": n_diamond_cvd,
+    },
     "AlN": {
-        "name": "Aluminum Nitride (c-axis AlN)",
+        "name": "Aluminum Nitride (c-axis AlN, UV-Vis-MIR 0.26-5.2 um)",
         "category": "III-Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.60,
         "fn": lambda wl, t=T_REF_K: n_aln_film(wl, t),
     },
+    "GaN": {
+        "name": "Gallium Nitride (c-axis GaN, Vis-MIR 0.39-6.5 um)",
+        "category": "III-Nitride",
+        "default_band_nm": 780.0,
+        "typical_loss_db_cm": 0.90,
+        "fn": n_gan_wurtzite,
+    },
     "ScAlN_10": {
-        "name": "Sc0.10Al0.90N (10% Sc-doped AlN)",
+        "name": "Sc0.10Al0.90N (10% Sc-doped AlN, 0.38-5.0 um)",
         "category": "III-Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 1.20,
         "fn": lambda wl, t=T_REF_K: n_scaln_film(wl, t, sc_fraction=0.10),
     },
     "ScAlN_20": {
-        "name": "Sc0.20Al0.80N (20% Sc-doped AlN)",
+        "name": "Sc0.20Al0.80N (20% Sc-doped AlN, 0.38-5.0 um)",
         "category": "III-Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 1.80,
         "fn": lambda wl, t=T_REF_K: n_scaln_film(wl, t, sc_fraction=0.20),
     },
     "ScAlN_30": {
-        "name": "Sc0.30Al0.70N (30% Sc-doped AlN)",
+        "name": "Sc0.30Al0.70N (30% Sc-doped AlN, 0.38-5.0 um)",
         "category": "III-Nitride",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 2.50,
         "fn": lambda wl, t=T_REF_K: n_scaln_film(wl, t, sc_fraction=0.30),
     },
     "LN_Zcut": {
-        "name": "Lithium Niobate (TFLN Z-cut)",
+        "name": "Lithium Niobate (TFLN Z-cut, Vis-MIR 0.40-5.0 um)",
         "category": "Ferroelectric",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.10,
         "fn": n_linbo3_zcut,
     },
     "LN_Xcut": {
-        "name": "Lithium Niobate (TFLN X-cut, Y-prop)",
+        "name": "Lithium Niobate (TFLN X-cut, Vis-MIR 0.40-5.0 um)",
         "category": "Ferroelectric",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.10,
         "fn": lambda wl, t=T_REF_K: n_linbo3_xcut(wl, t, inplane_propagation_angle_deg=0.0),
     },
-    "Ge": {
-        "name": "Germanium (c-Ge Mid-IR)",
-        "category": "Group IV",
-        "default_band_nm": 4200.0,
-        "typical_loss_db_cm": 2.0,
-        "fn": n_ge_crystalline,
-    },
     "Al2O3": {
-        "name": "Alumina / Sapphire (Al2O3)",
-        "category": "Dielectric",
+        "name": "Alumina / Sapphire (Al2O3, 0.25-5.5 um)",
+        "category": "Dielectric/Clad",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.20,
         "fn": n_al2o3_sapphire,
     },
+    "CaF2": {
+        "name": "Calcium Fluoride (CaF2 Mid-IR Clad, 0.15-9.5 um)",
+        "category": "Mid-IR Cladding",
+        "default_band_nm": 4200.0,
+        "typical_loss_db_cm": 0.05,
+        "fn": n_caf2_fluoride,
+    },
+    "MgF2": {
+        "name": "Magnesium Fluoride (MgF2 Mid-IR Clad, 0.14-7.5 um)",
+        "category": "Mid-IR Cladding",
+        "default_band_nm": 4200.0,
+        "typical_loss_db_cm": 0.08,
+        "fn": n_mgf2_fluoride,
+    },
     "SiO2": {
-        "name": "Fused Silica (SiO2 BOX/Clad)",
-        "category": "Dielectric",
+        "name": "Fused Silica (SiO2 BOX/Clad, 0.21-3.65 um)",
+        "category": "Dielectric/Clad",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.01,
         "fn": n_sio2_sellmeier,
     },
     "GSST_amorphous": {
-        "name": "GSST PCM (Amorphous Low-Loss)",
+        "name": "GSST PCM (Amorphous Low-Loss, 1.5-10.0 um)",
         "category": "Phase-Change",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.50,
         "fn": lambda wl, t=T_REF_K: n_gsst_pcm(wl, state="amorphous"),
     },
     "GSST_crystalline": {
-        "name": "GSST PCM (Crystalline High-Index)",
+        "name": "GSST PCM (Crystalline High-Index, 1.5-10.0 um)",
         "category": "Phase-Change",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 150.0,
         "fn": lambda wl, t=T_REF_K: n_gsst_pcm(wl, state="crystalline"),
     },
     "Air": {
-        "name": "Air / Vacuum (n = 1.0)",
+        "name": "Air / Vacuum (n = 1.0, Broadband)",
         "category": "Cladding",
         "default_band_nm": 1550.0,
         "typical_loss_db_cm": 0.0,
         "fn": n_air,
     },
 }
+
+
+def check_wavelength_compatibility(
+    core_material: str,
+    clad_material: str,
+    top_clad_material: str,
+    wavelength_nm: float,
+) -> list[str]:
+    """Return physical transparency & index-contrast warnings across UV/Vis/O/C/MIR."""
+    wl_um = float(wavelength_nm) * 1e-3
+    wl_m = float(wavelength_nm) * 1e-9
+    warnings: list[str] = []
+    try:
+        core_t = get_material_fn(core_material)(wl_m, T_REF_K)
+        clad_t = get_material_fn(clad_material)(wl_m, T_REF_K)
+        top_t = get_material_fn(top_clad_material)(wl_m, T_REF_K)
+    except Exception:
+        return warnings
+
+    lo_c, hi_c = core_t.validity_um
+    if wl_um < lo_c * 0.98:
+        warnings.append(
+            f"Core '{core_material}' absorbs strongly at {wavelength_nm:.0f} nm (transparency >= {lo_c*1000:.0f} nm, k={core_t.kx:.2e}). "
+            "Consider Si3N4, TiO2, Ta2O5, AlN, GaN, 4H-SiC, LN, or Diamond."
+        )
+    elif wl_um > hi_c * 1.02:
+        warnings.append(
+            f"Core '{core_material}' exceeds multiphonon transparency limit ({hi_c:.1f} um) at {wl_um:.2f} um. "
+            "Consider Ge, Si (<=8.5 um), or Diamond."
+        )
+
+    for role, cname, ct in (("Bottom cladding", clad_material, clad_t), ("Top cladding", top_clad_material, top_t)):
+        if cname == "Air":
+            continue
+        lo_cl, hi_cl = ct.validity_um
+        if wl_um > hi_cl * 1.02 or ct.kx > 1e-4:
+            warnings.append(
+                f"{role} '{cname}' has Mid-IR absorption at {wl_um:.2f} um (limit ~{hi_cl:.2f} um, k={ct.kx:.2e}). "
+                "Switch cladding to CaF2, MgF2, Al2O3 (<=5.5 um), Si (for Ge-on-Si), or Air."
+            )
+
+    if max(core_t.nx, core_t.ny) <= max(clad_t.nx, top_t.nx) + 0.02:
+        warnings.append(
+            f"Total internal reflection violated: core index ({max(core_t.nx, core_t.ny):.3f}) <= cladding index ({max(clad_t.nx, top_t.nx):.3f})."
+        )
+    return warnings
 
 
 def get_material_fn(

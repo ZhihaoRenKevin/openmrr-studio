@@ -96,7 +96,7 @@ async def _asgi_request(
 
 
 def test_materials_and_hardware() -> None:
-    assert len(MATERIAL_CATALOG) == 18
+    assert len(MATERIAL_CATALOG) == 24
     for _key, meta in MATERIAL_CATALOG.items():
         wl_m = float(meta["default_band_nm"]) * 1e-9
         props = meta["fn"](wl_m, T_REF_K)
@@ -253,7 +253,7 @@ def test_http_endpoints_and_gds_upload() -> None:
                 assert st == 200 and b"OpenMRR Studio" in body
 
                 st, body = await _asgi_request("GET", "/api/materials")
-                assert st == 200 and len(json.loads(body)["materials"]) == 18
+                assert st == 200 and len(json.loads(body)["materials"]) == 24
 
                 st, body = await _asgi_request("POST", "/api/chat_init")
                 init = json.loads(body)
@@ -346,6 +346,75 @@ def test_agent_tools_and_mcp_minimal_tokens() -> None:
     assert len(json.dumps(sw_kpi, separators=(",", ":"))) < 450
 
 
+def test_multiband_vis_1310_midir_and_warnings() -> None:
+    # 1. Visible 532 nm Si3N4
+    vis = simulate_mrr_topology(
+        MRRDesignConfig(
+            topology="point_circular_ap",
+            core_material="Si3N4",
+            clad_material="SiO2",
+            top_clad_material="SiO2",
+            film_height_um=0.18,
+            ring_width_um=0.38,
+            bus_width_um=0.34,
+            ring_radius_um=25.0,
+            gap_thru_um=0.14,
+            wavelength_nm=532.0,
+            span_nm=2.2,
+        )
+    )
+    assert 1.65 < vis["metrics"]["neff_ring"] < 2.08
+    assert len(vis["wavelength_warnings"]) == 0
+
+    # 2. Datacom O-band 1310 nm SOI
+    oband = simulate_mrr_topology(
+        MRRDesignConfig(
+            topology="point_circular_ad",
+            core_material="Si",
+            clad_material="SiO2",
+            top_clad_material="SiO2",
+            film_height_um=0.22,
+            ring_width_um=0.40,
+            bus_width_um=0.38,
+            ring_radius_um=15.0,
+            gap_thru_um=0.16,
+            gap_drop_um=0.20,
+            wavelength_nm=1310.0,
+            span_nm=10.0,
+        )
+    )
+    assert 2.45 < oband["metrics"]["neff_ring"] < 2.95
+    assert oband["metrics"]["ng_ring"] > 3.80
+    assert len(oband["wavelength_warnings"]) == 0
+
+    # 3. Mid-IR 4200 nm Ge on CaF2
+    mir = simulate_mrr_topology(
+        MRRDesignConfig(
+            topology="point_circular_ap",
+            core_material="Ge",
+            clad_material="CaF2",
+            top_clad_material="Air",
+            film_height_um=1.40,
+            slab_height_um=0.30,
+            ring_width_um=2.00,
+            bus_width_um=1.80,
+            ring_radius_um=65.0,
+            gap_thru_um=0.40,
+            wavelength_nm=4200.0,
+            span_nm=35.0,
+        )
+    )
+    assert 3.40 < mir["metrics"]["neff_ring"] < 4.05
+    assert len(mir["wavelength_warnings"]) == 0
+
+    # 4. Physical opacity warnings: c-Si at 532 nm & SiO2 cladding at 4500 nm
+    bad_vis = simulate_mrr_topology(
+        MRRDesignConfig(core_material="Si", wavelength_nm=532.0, film_height_um=0.18, ring_width_um=0.35, bus_width_um=0.30)
+    )
+    assert len(bad_vis["wavelength_warnings"]) >= 1
+    assert bad_vis["metrics"]["Q_int"] < 5000
+
+
 def main() -> None:
     tests = [
         ("Materials & Hardware Probe", test_materials_and_hardware),
@@ -356,6 +425,7 @@ def main() -> None:
         ("Lab Spectrum CMT Split-Doublet Fitter", test_cmt_spectrum_fitter),
         ("HTTP ASGI Endpoints & GDS Upload/Download", test_http_endpoints_and_gds_upload),
         ("Token-Minimal Codex/Claude Agent CLI & MCP Server", test_agent_tools_and_mcp_minimal_tokens),
+        ("Multi-Waveband Physics (Visible 532nm / O-Band 1310nm / Mid-IR 4.2um)", test_multiband_vis_1310_midir_and_warnings),
     ]
     print("=" * 72)
     print("Running OpenMRR Studio v3.0 Full Verification Suite")

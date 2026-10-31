@@ -43,6 +43,8 @@ def _cfg_from_dict(d: dict) -> MRRDesignConfig:
     aliases = {
         "mat": "core_material",
         "material": "core_material",
+        "clad": "clad_material",
+        "top_clad": "top_clad_material",
         "top": "topology",
         "h_um": "film_height_um",
         "slab_um": "slab_height_um",

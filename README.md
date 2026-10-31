@@ -2,8 +2,10 @@
 
 **Design, sweep, fit, and lay out integrated photonic microring resonators — through a conversational AI copilot, interactive 2D workbench, and bidirectional GDSII bridge — with zero Ansys Lumerical, Synopsys RSoft, or COMSOL licenses.**
 
-[English](./README.md) | [简体中文](./README_zh-CN.md) | [Chatbot & GDS Tutorial](./docs/tutorials/chatbot_and_gds_guide.md) | [Codex & Claude Agent Guide](./docs/tutorials/ai_agents_codex_claude.md) | [Roadmap](./ROADMAP.md)
+[English](./README.md) | [简体中文](./README_zh-CN.md) | [Verification & Benchmarks](./docs/VERIFICATION_AND_BENCHMARKS.md) | [Chatbot & GDS Tutorial](./docs/tutorials/chatbot_and_gds_guide.md) | [Codex & Claude MCP Guide](./docs/tutorials/ai_agents_codex_claude.md) | [llms.txt](./llms.txt) | [Changelog](./CHANGELOG.md)
 
+[![Wavebands: 400nm–14µm](https://img.shields.io/badge/wavebands-400nm%20Vis%20to%2014%CE%BCm%20Mid--IR-ec4899.svg)](./docs/VERIFICATION_AND_BENCHMARKS.md)
+[![MCP Server: <150 tokens/call](https://img.shields.io/badge/MCP_Server-%3C150_tokens%2Fcall-f59e0b.svg)](./server.json)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](./pyproject.toml)
 [![Solver: Pure-BSD Conformal FEM](https://img.shields.io/badge/eigenmode-scikit--fem%20(BSD)-0284c7.svg)](./src/openmrr/eigenmode_solver.py)
@@ -26,9 +28,12 @@ Most photonics students and engineers face two painful bottlenecks when designin
 - **Bidirectional GDSII / OASIS Bridge**:
   - **Upload `.gds` / `.oas` $\rightarrow$ Simulate**: Drop any microring `.gds` file into the app. OpenMRR merges core polygons (`gdstk` + `shapely`), detects whether the layout is a **Point-Coupled Circle**, **Racetrack**, **Concentric Pulley**, or **Dual-Ring Vernier**, measures `R`, `W_ring`, `W_bus`, `gap_thru`, `gap_drop`, `L_s`, and `pulley_angle` directly from the polygons, renders an interactive 2D GDS caliper viewer, and simulates the optical spectrum once you confirm the wafer thickness.
   - **Design / Sweep $\rightarrow$ Create `.gds` + KLayout `.lyp`**: Export either a single annotated resonator cell (with optical port pins `65/0`, TiN heater `10/0`, GSG pads `11/0`) or a multi-device **MPW parameter-sweep array `.gds`** plus a matching KLayout `.lyp` color file.
-- **7 Topologies & 18 Clean-Room Materials Built-In**:
+- **7 Topologies & 24 Multi-Waveband Materials (`Visible 400 nm` $\rightarrow$ `O-Band 1310 nm` $\rightarrow$ `C-Band 1550 nm` $\rightarrow$ `SWIR 2 µm` $\rightarrow$ `Mid-IR 3–14 µm`)**:
   - **Topologies**: `point_circular_ap`, `point_circular_ad`, `racetrack_ap`, `racetrack_ad`, `pulley_ap`, `pulley_ad`, and `vernier_crow_ad` (2nd-order CROW / Vernier filter).
-  - **Materials**: `Si (SOI)`, `a-Si:H`, `LPCVD Si3N4`, `Si-Rich SiNx`, `4H-SiC`, `3C-SiC`, `AlN`, `ScAlN (10% / 20% / 30% Sc)`, `Z-cut TFLN`, `X-cut TFLN` (with in-plane extraordinary/ordinary orientation averaging!), `Mid-IR Ge`, `Al2O3`, `SiO2`, `GSST` (amorphous & crystalline PCM), `Air`, and `Custom (n, k)`.
+  - **Materials (24)**:
+    - *Visible / VNIR / Quantum (`400–950 nm`)*: `TiO2` (anatase, athermal $dn/dT < 0$), `Ta2O5`, `GaN` (uniaxial), `Diamond` (UV–LWIR), `Al2O3`, `AlN`, `Si3N4`, `4H-SiC`, `LN Z/X-cut`.
+    - *O-Band (`1310 nm`), C/L-Band (`1550 nm`) & SWIR (`2000 nm`)*: `Si (SOI)`, `a-Si:H`, `LPCVD Si3N4`, `Si-Rich SiNx`, `4H-SiC`, `3C-SiC`, `AlN`, `ScAlN (10% / 20% / 30% Sc)`, `Z-cut TFLN`, `X-cut TFLN` (in-plane orientation averaging), `GSST` (amorphous & crystalline PCM).
+    - *Mid-IR (`3.0–14.0 µm`)*: `Ge` (`Ge-on-CaF2`, `Ge-on-MgF2`, `Ge-on-Si`), `Diamond`, `Si` (suspended / sapphire), `CaF2`, `MgF2`, `Air`, `SiO2` (with automatic $>3.6\text{ µm}$ multiphonon & interband absorption warnings!).
 - **Hardware-Aware Across macOS & Windows (`CUDA GPU` vs `CPU`)**: Automatically probes **NVIDIA CUDA (`FP64`)** on Windows/Linux workstations, **Apple Silicon Accelerate AMX / Metal (`MLX`/`MPS`)** on M-series Macs, or **Multi-Core Vectorized CPU** on standard laptops (>25 Million wavelength pts/s for broadband TMM spectra).
 
 ```mermaid
@@ -99,6 +104,9 @@ uv run python examples/01_devices_and_sweeps/01_soi_point_and_racetrack.py
 
 # 3. Synthesize 4H-SiC concentric pulley critical coupling & X-cut TFLN EO tuning:
 uv run python examples/01_devices_and_sweeps/02_sin_and_sic_pulley_cc.py
+
+# 3b. Multi-waveband showcase: Visible 532/780 nm, O-band 1310 nm, SWIR 2 um & Mid-IR 4.2/7.5 um:
+uv run python examples/01_devices_and_sweeps/03_multiband_vis_1310_midir.py
 
 # 4. Create single-device & 5-ring MPW sweep array .GDS + KLayout .lyp:
 uv run python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
@@ -175,7 +183,7 @@ openmrr-studio/
 ├── pyproject.toml / .python-version       uv / Hatchling package config (MIT)
 ├── launchers/                             Double-clickable macOS (.command) & Windows (.bat) launchers
 ├── src/openmrr/
-│   ├── materials.py                       18 clean-room materials (Sellmeier, anisotropy, dn/dT, r_ij, n2)
+│   ├── materials.py                       24 multi-band materials (Vis -> O/C -> Mid-IR, dn/dT, r_ij, k)
 │   ├── conformal_mesher.py                Pure-BSD constrained Delaunay waveguide mesher (zero GPL)
 │   ├── eigenmode_solver.py                2D full-vector Nedelec1/Lagrange FEM (bent + straight) & FDE
 │   ├── mrr_cmt_spatial.py                 Cylindrical vector overlap & pulley spatial CMT integrator
@@ -189,7 +197,8 @@ openmrr-studio/
 │   ├── ui_frontend.py                     Zero-CDN Retina 2x Canvas + SVG split-screen workbench
 │   ├── desktop_app.py  cli.py             Native pywebview launcher & `openmrr` CLI
 │   └── build_standalone.py                PyInstaller packager for macOS .app & Windows CPU/CUDA .exe
-├── examples/                              7 self-contained cookbook scripts (Level 0 -> Level 3)
+├── examples/                              8 self-contained cookbook scripts (Visible -> 1310/1550 -> Mid-IR)
+├── benchmarks/lumerical_validation/       Dual-engine FEM vs Yee-FDE audit + Ansys Lumerical lumapi runner
 ├── scripts/generate_hero_figure.py        Generates `docs/images/hero_openmrr_overview.{png,svg}` + CSVs
 ├── docs/                                  Tutorials & high-resolution overview figures
 └── tests/                                 Automated pytest suite (FEM, CMT, sweeps, GDS roundtrip, API)

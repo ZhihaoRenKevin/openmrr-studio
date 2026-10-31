@@ -43,6 +43,7 @@ from .materials import (
     EPS0_F_PER_M,
     MATERIAL_CATALOG,
     T_REF_K,
+    check_wavelength_compatibility,
     get_material_fn,
     n_linbo3_xcut,
 )
@@ -224,13 +225,15 @@ def _solve_single_mode(
             pass
 
     n_modes = 4
+    wl_scale_grid = float(np.clip((wavelength_m * 1e9) / 1550.0, 0.65, 2.80))
+    grid_step_um = 0.025 if abs(wl_scale_grid - 1.0) < 0.05 else round(max(0.016, 0.025 * wl_scale_grid), 4)
     if solver_backend == "fde":
         modes = solve_modes_fde_tidy3d(
             spec,
             wavelength_m,
             bend_radius_m=bend_radius_m,
             num_modes=n_modes,
-            core_dl_um=max(core_mesh_res_um * 0.65, 0.020),
+            core_dl_um=max(core_mesh_res_um * 0.65, 0.010),
         )
     else:
         modes = solve_modes_fem(
@@ -239,8 +242,8 @@ def _solve_single_mode(
             bend_radius_m=bend_radius_m,
             num_modes=n_modes,
             core_mesh_res_um=core_mesh_res_um,
-            clad_mesh_res_um=max(core_mesh_res_um * 5.0, 0.22),
-            eval_grid_step_um=0.025,
+            clad_mesh_res_um=max(core_mesh_res_um * 5.0, 0.14 * wl_scale_grid),
+            eval_grid_step_um=grid_step_um,
             export_grid=export_grid,
             mesh_backend="bsd_conformal",
         )
@@ -512,12 +515,32 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         else float(MATERIAL_CATALOG.get(cfg.core_material, {}).get("typical_loss_db_cm", 1.0))
     )
 
-    # Size radial domain generously so outer bus/ring evanescent tail is resolved for coupler overlap
-    max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, 1.10)
-    x_max_ring_um = max(3.0, 0.5 * cfg.ring_width_um + max_gap_um + cfg.bus_width_um + 0.9)
-    x_min_ring_um = -max(2.6, 0.5 * cfg.ring_width_um + 1.8)
+    # Wavelength-adaptive domain box & mesh resolution across Visible (400 nm) -> O/C -> Mid-IR (12 um)
+    wl_um = cfg.wavelength_nm * 1e-3
+    wl_scale = float(np.clip(cfg.wavelength_nm / 1550.0, 0.32, 4.50))
+    eff_mesh_um = (
+        0.045
+        if abs(cfg.core_mesh_res_um - 0.045) < 1e-6 and abs(wl_scale - 1.0) < 0.05
+        else (
+            round(float(np.clip(0.045 * wl_scale, 0.015, 0.150)), 4)
+            if abs(cfg.core_mesh_res_um - 0.045) < 1e-6
+            else float(cfg.core_mesh_res_um)
+        )
+    )
+    box_pad_um = 2.5 if abs(wl_scale - 1.0) < 0.05 else round(max(1.8, 1.35 * wl_um), 3)
+    max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, round(0.72 * wl_um, 3), 0.70)
+    x_max_ring_um = max(2.2 * wl_scale, 0.5 * cfg.ring_width_um + max_gap_um + cfg.bus_width_um + 0.65 * wl_um + 0.25)
+    x_min_ring_um = -max(1.9 * wl_scale, 0.5 * cfg.ring_width_um + 1.15 * wl_um)
+    if abs(wl_scale - 1.0) < 0.05:
+        max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, 1.10)
+        x_max_ring_um = max(3.0, 0.5 * cfg.ring_width_um + max_gap_um + cfg.bus_width_um + 0.9)
+        x_min_ring_um = -max(2.6, 0.5 * cfg.ring_width_um + 1.8)
     if cfg.ring_radius_um > 0:
         x_min_ring_um = max(x_min_ring_um, -0.82 * cfg.ring_radius_um)
+
+    wavelength_warnings = check_wavelength_compatibility(
+        cfg.core_material, cfg.clad_material, cfg.top_clad_material, cfg.wavelength_nm
+    )
 
     ring_spec = WaveguideCrossSectionSpec(
         w_bottom_um=cfg.ring_width_um,
@@ -535,9 +558,12 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         cap_material_fn=cap_fn,
         x_min_um=x_min_ring_um,
         x_max_um=x_max_ring_um,
+        h_box_um=box_pad_um,
+        h_top_clad_um=box_pad_um,
         temperature_k=T_REF_K,
     )
 
+    bus_dom_w = 5.2 if abs(wl_scale - 1.0) < 0.05 else max(3.4 * wl_scale, cfg.bus_width_um + 2.4 * wl_um)
     bus_spec = WaveguideCrossSectionSpec(
         w_bottom_um=cfg.bus_width_um,
         h_film_um=cfg.film_height_um,
@@ -549,32 +575,36 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         interlayer_h_um=cfg.interlayer_h_um,
         upper_core_h_um=cfg.upper_core_h_um,
         upper_core_material_fn=up_fn,
-        domain_width_um=max(5.2, cfg.bus_width_um + 3.6),
+        domain_width_um=max(bus_dom_w, cfg.bus_width_um + (3.6 if abs(wl_scale - 1.0) < 0.05 else 2.4 * wl_um)),
+        h_box_um=box_pad_um,
+        h_top_clad_um=box_pad_um,
         temperature_k=T_REF_K,
     )
 
     r1_m = cfg.ring_radius_um * 1e-6
     ring_bent_mode = _solve_single_mode(
-        ring_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=True
+        ring_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=True
     )
     neff_bent = float(np.real(ring_bent_mode.n_eff))
     ng_bent = _compute_group_index_fast(
-        ring_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, neff_bent
+        ring_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, eff_mesh_um, neff_bent
     )
 
     mat_core_val = core_fn(wl_m, T_REF_K)
     mat_clad_val = clad_fn(wl_m, T_REF_K)
+    mat_top_val = top_fn(wl_m, T_REF_K)
     n_core_xyz = (mat_core_val.nx, mat_core_val.ny, mat_core_val.nz)
-    n_clad_scalar = mat_clad_val.nx
+    # Etched waveguide ridges (y in [h_slab, h_film]) displace the upper cladding medium
+    n_clad_scalar = mat_top_val.nx
 
     # Handle X-cut LiNbO3 azimuthal bend averaging & Racetrack straight sections
     if cfg.topology.startswith("racetrack"):
         ring_straight_mode = _solve_single_mode(
-            ring_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=True
+            ring_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=True
         )
         neff_str = float(np.real(ring_straight_mode.n_eff))
         ng_str = _compute_group_index_fast(
-            ring_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, neff_str
+            ring_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, eff_mesh_um, neff_str
         )
         if cfg.core_material == "LN_Xcut":
             # Average Y-propagating bend start (phi=0) and X-propagating bend apex (phi=90 deg)
@@ -586,10 +616,12 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
                 core_material_fn=lambda w, t=T_REF_K: n_linbo3_xcut(w, t, inplane_propagation_angle_deg=90.0),
                 clad_material_fn=clad_fn,
                 top_clad_material_fn=top_fn,
-                domain_width_um=5.5,
+                domain_width_um=max(5.5, 3.6 * wl_scale),
+                h_box_um=box_pad_um,
+                h_top_clad_um=box_pad_um,
             )
             m_apex = _solve_single_mode(
-                apex_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=False
+                apex_spec, wl_m, r1_m, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=False
             )
             neff_bent_avg = 0.5 * (neff_bent + float(np.real(m_apex.n_eff)))
             ng_bent_avg = ng_bent + (neff_bent_avg - neff_bent)
@@ -608,9 +640,12 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         neff_rt = neff_bent
         ng_rt = ng_bent
 
-    # Intrinsic cavity decay & Q_int from propagation loss + optional material absorption k
+    # Intrinsic cavity decay & Q_int from propagation loss + core/cladding material absorption k
     neff_imag_modal = float(abs(np.imag(ring_bent_mode.n_eff)))
-    alpha_power_per_m = alpha_db_cm * 100.0 * (math.log(10.0) / 10.0) + (4.0 * math.pi * neff_imag_modal / wl_m)
+    k_core_bulk = ring_bent_mode.core_confinement * max(mat_core_val.kx, 0.0)
+    k_clad_bulk = (1.0 - ring_bent_mode.core_confinement) * 0.5 * (max(mat_clad_val.kx, 0.0) + max(mat_top_val.kx, 0.0))
+    k_eff_mat = max(neff_imag_modal, k_core_bulk + k_clad_bulk)
+    alpha_power_per_m = alpha_db_cm * 100.0 * (math.log(10.0) / 10.0) + (4.0 * math.pi * k_eff_mat / wl_m)
     a_rt = math.exp(-0.5 * alpha_power_per_m * (l_rt_um * 1e-6))
     kp_intrinsic_loss = 1.0 - (a_rt ** 2)
     q_int = (2.0 * math.pi * ng_rt) / max(alpha_power_per_m * wl_m, 1e-18)
@@ -622,10 +657,12 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
     # ------------------------------------------------------------------
     # Synthesize Couplers per Topology
     # ------------------------------------------------------------------
+    quad_cyl_m = float(np.clip(0.020e-6 * wl_scale, 0.008e-6, 0.055e-6))
+    quad_lat_um = float(np.clip(0.025 * wl_scale, 0.010, 0.060))
     if cfg.topology in ("pulley_ap", "pulley_ad"):
         bus_r_thru_m = (cfg.ring_radius_um + 0.5 * cfg.ring_width_um + cfg.gap_thru_um + 0.5 * cfg.bus_width_um) * 1e-6
         bus_mode_thru = _solve_single_mode(
-            bus_spec, wl_m, bus_r_thru_m, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=True
+            bus_spec, wl_m, bus_r_thru_m, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=True
         )
         cc_dict = coupling_coefficient_cylindrical(
             ring_bent_mode.to_spatial_cmt_field_dict(),
@@ -639,7 +676,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             sidewall_deg=cfg.sidewall_deg,
             n_core_xyz=n_core_xyz,
             n_clad=n_clad_scalar,
-            quad_step_m=0.020e-6,
+            quad_step_m=quad_cyl_m,
             ring_azimuthal_m=ring_bent_mode.m_azimuthal,
             bus_neff=float(np.real(bus_mode_thru.n_eff)),
         )
@@ -663,7 +700,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
                 ch_drop = ch_thru
             else:
                 bus_mode_drop = _solve_single_mode(
-                    bus_spec, wl_m, bus_r_drop_m, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=True
+                    bus_spec, wl_m, bus_r_drop_m, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=True
                 )
                 cc_d = coupling_coefficient_cylindrical(
                     ring_bent_mode.to_spatial_cmt_field_dict(),
@@ -677,7 +714,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
                     sidewall_deg=cfg.sidewall_deg,
                     n_core_xyz=n_core_xyz,
                     n_clad=n_clad_scalar,
-                    quad_step_m=0.020e-6,
+                    quad_step_m=quad_cyl_m,
                     ring_azimuthal_m=ring_bent_mode.m_azimuthal,
                     bus_neff=float(np.real(bus_mode_drop.n_eff)),
                 )
@@ -710,9 +747,11 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
     else:
         # Straight bus eigenmode + lateral gap perturbation curve k_d(g)
         bus_mode_str = _solve_single_mode(
-            bus_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, cfg.core_mesh_res_um, export_grid=True
+            bus_spec, wl_m, math.inf, cfg.polarization, cfg.solver_backend, eff_mesh_um, export_grid=True
         )
-        gaps_grid = np.linspace(0.08, max(max_gap_um + 0.55, 1.15), 48)
+        g_min_um = max(0.05, round(0.08 * min(wl_scale, 1.5), 3))
+        g_max_um = max(max_gap_um + 0.50 * wl_scale, 0.95 * wl_scale, 0.70)
+        gaps_grid = np.linspace(g_min_um, g_max_um, 48)
         ref_ring_for_coupler = ring_straight_mode if cfg.topology.startswith("racetrack") else ring_bent_mode
         kd_grid = _lateral_perturbation_kd_vs_gap(
             ref_ring_for_coupler,
@@ -726,6 +765,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             n_core_xyz=n_core_xyz,
             n_clad=n_clad_scalar,
             wavelength_m=wl_m,
+            quad_step_um=quad_lat_um,
         )
         k0_wave = 2.0 * math.pi / wl_m
         beta_ring_c = k0_wave * float(np.real(ref_ring_for_coupler.n_eff))
@@ -741,7 +781,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
                 )
                 if is_4port else 0.0
             )
-            g_sweep = np.linspace(0.08, 0.90, 42)
+            g_sweep = np.linspace(g_min_um, min(g_max_um * 0.85, max(0.90 * wl_scale, 0.55)), 42)
             kp_sweep = np.array([
                 _point_coupler_kappa_power_from_gap_curve(float(g), cfg.ring_radius_um, gaps_grid, kd_grid, beta_ring_c, beta_bus_c)
                 for g in g_sweep
@@ -791,17 +831,22 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             kp_thru = _rt_kp(cfg.straight_length_um, cfg.gap_thru_um)
             kp_drop = _rt_kp(cfg.straight_length_um, cfg.gap_drop_um) if is_4port else 0.0
 
-            ls_sweep = np.linspace(0.5, max(cfg.straight_length_um * 2.5, 45.0), 60)
+            ls_sweep = np.linspace(0.5, max(cfg.straight_length_um * 2.5, 45.0 * wl_scale), 60)
             kp_sweep = np.array([_rt_kp(float(ls), cfg.gap_thru_um) for ls in ls_sweep])
-            target_kp = 1.0 - (a_rt ** 2) * (1.0 - kp_drop)
-            q_ext_sweep = (2.0 * math.pi * ng_rt * (l_rt_um * 1e-6) / wl_m) / np.maximum(-np.log1p(-np.clip(kp_sweep, 1e-12, 0.9999)), 1e-12)
-            cp_sweep = kp_sweep / max(target_kp, 1e-12)
-            cc_found = bool(kp_sweep.min() <= target_kp <= kp_sweep.max())
-            cc_ls = float(ls_sweep[int(np.argmin(np.abs(kp_sweep - target_kp)))])
+            l_rt_sweep_m = (2.0 * math.pi * cfg.ring_radius_um + 2.0 * ls_sweep) * 1e-6
+            target_kp_vec = 1.0 - np.exp(-alpha_power_per_m * l_rt_sweep_m) * (1.0 - kp_drop)
+            q_ext_sweep = (2.0 * math.pi * ng_rt * l_rt_sweep_m / wl_m) / np.maximum(-np.log1p(-np.clip(kp_sweep, 1e-12, 0.9999)), 1e-12)
+            cp_sweep = kp_sweep / np.maximum(target_kp_vec, 1e-12)
+            diff_vec = kp_sweep - target_kp_vec
+            cc_found = bool(np.any(diff_vec[:-1] * diff_vec[1:] <= 0.0))
+            cc_ls = float(ls_sweep[int(np.argmin(np.abs(diff_vec)))])
             if cc_found:
                 for j in range(len(ls_sweep) - 1):
-                    if (kp_sweep[j] - target_kp) * (kp_sweep[j + 1] - target_kp) <= 0:
-                        cc_ls = float(brentq(lambda ls: _rt_kp(ls, cfg.gap_thru_um) - target_kp, float(ls_sweep[j]), float(ls_sweep[j + 1]), xtol=1e-3))
+                    if diff_vec[j] * diff_vec[j + 1] <= 0.0:
+                        cc_ls = float(brentq(
+                            lambda ls: _rt_kp(ls, cfg.gap_thru_um) - (1.0 - math.exp(-alpha_power_per_m * (2.0 * math.pi * cfg.ring_radius_um + 2.0 * ls) * 1e-6) * (1.0 - kp_drop)),
+                            float(ls_sweep[j]), float(ls_sweep[j + 1]), xtol=1e-3,
+                        ))
                         break
             coupler_sweep = {
                 "param_name": "straight_length_um",
@@ -943,6 +988,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             dense_clusters.append(np.append(cluster, lam_res))
     wl_vec = np.unique(np.concatenate(dense_clusters))
 
+    alpha_eff_db_cm = alpha_power_per_m / (100.0 * math.log(10.0) / 10.0)
     if cfg.topology == "vernier_crow_ad" and vernier_summary is not None:
         spec_out = _vernier_crow_spectra(
             wl_vec,
@@ -953,7 +999,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             neff2_ref=neff_r2,
             ng2_ref=ng_r2,
             lambda_ref_nm=cfg.wavelength_nm,
-            alpha_db_per_cm=alpha_db_cm,
+            alpha_db_per_cm=alpha_eff_db_cm,
             kp_thru=kp_thru,
             kp_inter=vernier_summary["kappa_inter_power"],
             kp_drop=kp_drop,
@@ -967,7 +1013,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             neff_at_ref=neff_rt,
             ng_at_ref=ng_rt,
             lambda_ref_nm=cfg.wavelength_nm,
-            alpha_loss_db_per_cm=alpha_db_cm,
+            alpha_loss_db_per_cm=alpha_eff_db_cm,
             kappa_power_thru=kp_thru,
             kappa_power_drop=kp_drop,
             delta_neff_tuning=dneff_complex,
@@ -1047,6 +1093,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         },
         "vernier": vernier_summary,
         "tuning": tuning_info,
+        "wavelength_warnings": wavelength_warnings,
         "coupler_sweep": coupler_sweep,
         "spectrum": {
             "wavelength_nm": np.round(wl_vec, 5).tolist(),

@@ -20,4 +20,7 @@ When helping users design, sweep, fit, or lay out photonic microring resonators 
 
 ## Valid Keys Quick Reference
 - **7 Topologies (`--top`)**: `point_circular_ap`, `point_circular_ad`, `racetrack_ap`, `racetrack_ad`, `pulley_ap`, `pulley_ad`, `vernier_crow_ad`
-- **18 Materials (`--mat`)**: `Si`, `a-Si`, `Si3N4`, `SiRich_SiNx`, `4H-SiC`, `3C-SiC`, `AlN`, `ScAlN_10`, `ScAlN_20`, `ScAlN_30`, `LN_Zcut`, `LN_Xcut`, `Ge`, `Al2O3`, `SiO2`, `GSST_amorphous`, `GSST_crystalline`, `Air`
+- **24 Multi-Waveband Materials (`--mat`, `--clad`, `--top-clad` from `400 nm` Visible to `14 um` Mid-IR)**:
+  - *Visible / VNIR (`400–950 nm`)*: `TiO2`, `Ta2O5`, `GaN`, `Diamond`, `Al2O3`, `AlN`, `Si3N4`, `4H-SiC`, `LN_Zcut`, `LN_Xcut`
+  - *O-Band (`1310 nm`), C-Band (`1550 nm`) & SWIR (`2000 nm`)*: `Si`, `a-Si`, `Si3N4`, `SiRich_SiNx`, `4H-SiC`, `3C-SiC`, `AlN`, `ScAlN_10`, `ScAlN_20`, `ScAlN_30`, `LN_Zcut`, `LN_Xcut`, `GSST_amorphous`, `GSST_crystalline`
+  - *Mid-IR (`3.0–14.0 um`)*: `Ge`, `Diamond`, `Si`, `CaF2`, `MgF2`, `SiO2`, `Air`

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openmrr-studio"
-version = "3.0.0"
-description = "License-free conversational photonics microring designer: 2D full-vector Maxwell eigenmodes, spatial/temporal CMT, lab spectrum fitting, and bidirectional GDSII layout bridge — without Lumerical, RSoft, or COMSOL."
+version = "3.1.0"
+description = "License-free conversational photonics microring designer (Visible 400 nm to Mid-IR 14 um): 2D full-vector Maxwell eigenmodes, spatial/temporal CMT, lab spectrum fitting, bidirectional GDSII layout bridge, and token-minimal AI agent MCP — without Lumerical, RSoft, or COMSOL."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -19,7 +19,16 @@ keywords = [
   "silicon-nitride",
   "silicon-carbide",
   "lithium-niobate",
+  "visible-photonics",
+  "mid-infrared",
+  "mcp-server",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ZhihaoRenKevin/openmrr-studio"
+Repository = "https://github.com/ZhihaoRenKevin/openmrr-studio"
+Documentation = "https://github.com/ZhihaoRenKevin/openmrr-studio#readme"
+Issues = "https://github.com/ZhihaoRenKevin/openmrr-studio/issues"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",

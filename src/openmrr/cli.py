@@ -37,7 +37,7 @@ def _print_compact(data: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="openmrr",
-        description="OpenMRR Studio v3.0 — License-Free Photonics Eigenmode, CMT, GDSII & AI-Agent Suite",
+        description="OpenMRR Studio v3.1 — License-Free Multi-Waveband Photonics Eigenmode, CMT, GDSII & AI-Agent MCP Suite",
     )
     sub = parser.add_subparsers(dest="cmd")
 
@@ -75,6 +75,8 @@ def main() -> None:
     p_ad = ag_sub.add_parser("design", help="Local 2D FEM + CMT MRR synthesis (+ optional FSR/CC/GDS)")
     p_ad.add_argument("--top", default="point_circular_ap")
     p_ad.add_argument("--mat", default="Si3N4")
+    p_ad.add_argument("--clad", default=None, dest="clad_material")
+    p_ad.add_argument("--top-clad", default=None, dest="top_clad_material")
     p_ad.add_argument("--h", type=float, default=None, dest="h_um")
     p_ad.add_argument("--slab", type=float, default=None, dest="slab_um")
     p_ad.add_argument("--w-ring", type=float, default=None, dest="w_ring_um")

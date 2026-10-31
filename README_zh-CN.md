@@ -2,8 +2,10 @@
 
 **无需 Ansys Lumerical、Synopsys RSoft 或 COMSOL 商业许可证 —— 通过对话式 AI 光子设计助手（Copilot）、全矢量本征模与耦合模引擎、以及双向 GDSII 版图桥，一站式完成微环谐振器（MRR）选型、单模截止校验、临界耦合综合、扫参评估、版图生成与实验光谱拟合。**
 
-[English](./README.md) | [简体中文](./README_zh-CN.md) | [对话与 GDS 进阶教程](./docs/tutorials/chatbot_and_gds_guide.md) | [Codex 与 Claude 极省 Token 接入指南](./docs/tutorials/ai_agents_codex_claude.md) | [路线图](./ROADMAP.md)
+[English](./README.md) | [简体中文](./README_zh-CN.md) | [求解器交叉验证与基准](./docs/VERIFICATION_AND_BENCHMARKS.md) | [对话与 GDS 进阶教程](./docs/tutorials/chatbot_and_gds_guide.md) | [Codex 与 Claude 极省 Token 接入指南](./docs/tutorials/ai_agents_codex_claude.md) | [llms.txt](./llms.txt) | [更新日志](./CHANGELOG.md)
 
+[![Wavebands: 400nm–14µm](https://img.shields.io/badge/wavebands-400nm%20Vis%20to%2014%CE%BCm%20Mid--IR-ec4899.svg)](./docs/VERIFICATION_AND_BENCHMARKS.md)
+[![MCP Server: <150 tokens/call](https://img.shields.io/badge/MCP_Server-%3C150_tokens%2Fcall-f59e0b.svg)](./server.json)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](./pyproject.toml)
 [![Solver: Pure-BSD Conformal FEM](https://img.shields.io/badge/eigenmode-scikit--fem%20(BSD)-0284c7.svg)](./src/openmrr/eigenmode_solver.py)
@@ -22,8 +24,8 @@
 2. **双向 GDSII / OASIS 版图桥（`Upload GDS -> Simulate` + `Create GDS`）**：
    - **上传 `.gds` 自动测量并仿真**：拖入任意由 KLayout 或 `gdsfactory` 绘制的 `.gds`/`.oas` 微环文件，内置几何引擎（`gdstk` + `shapely`）自动识别**圆环点耦合、跑道型、同心滑轮（Pulley）或双环游标（Vernier）**，直接从多边形精确量取 `R`、`W_ring`、`W_bus`、`gap_thru`、`gap_drop`、`L_s` 与 `pulley_angle`，在交互式 2D 画布上用红色卡尺标出耦合间距，确认膜厚后即可一键算出光谱！
    - **一键生成单器件或 MPW 扫参阵列 `.gds` + KLayout `.lyp`**：自动包含波导芯层（`1/0`）、半刻蚀平板层（`2/0`）、TiN 微加热器（`10/0`）、GSG 电光焊盘（`11/0`）、端口引脚（`65/0`）及 KLayout 配色文件（`.lyp`）。
-3. **7 大微环拓扑 × 18 种洁净室光学材料库**：
-   涵盖 `Si (SOI)`、`a-Si:H`、`LPCVD Si3N4`、`富硅氮化硅 SiNx`、`4H-SiC`、`3C-SiC`、`AlN`、`ScAlN (10%/20%/30%)`、`Z切/X切薄膜铌酸锂 TFLN`（支持面内各向异性角度积分）、`中红外 Ge`、`Al2O3`、`SiO2`、`GSST 相变材料` 等，内置文献级色散、热光系数 `dn/dT` 与电光张量 `r_ij`。
+3. **全波段覆盖（可见光 `400 nm` $\rightarrow$ O波段 `1310 nm` $\rightarrow$ C波段 `1550 nm` $\rightarrow$ 短波红外 `2 µm` $\rightarrow$ 中远红外 `3–14 µm`）× 7 大拓扑 × 24 种洁净室材料**：
+   涵盖可见光/量子光学材料（`TiO2`、`Ta2O5`、`GaN`、`金刚石 Diamond`、`Al2O3`）、通信与非线性材料（`Si (SOI)`、`a-Si:H`、`LPCVD Si3N4`、`富硅氮化硅 SiNx`、`4H-SiC`、`3C-SiC`、`AlN`、`ScAlN (10%/20%/30%)`、`Z切/X切薄膜铌酸锂 TFLN`、`GSST 相变材料`）以及中红外低损耗材料与氟化物衬底（`Ge`、`CaF2`、`MgF2`、`Ge-on-Si`），内置跨波段自适应网格/仿真域缩放与带隙/多声子吸收自动预警（如 `Si < 1.12 µm` 禁带吸收与 `SiO2 > 3.6 µm` 中红外多声子吸收告警）。
 4. **跨平台自适应算力（macOS Apple Silicon / Windows CUDA GPU / 纯 CPU）且 100% MIT/BSD 开源合规**：
    自动探测 Windows/Linux 上的 **NVIDIA CUDA (`FP64`)**、Mac 上的 **Apple Accelerate AMX / Metal** 或普通轻薄本的 **多核矢量化 CPU**；内置纯 BSD 约束 Delaunay 保形网格器（零 GPL 传染依赖），可自由商业化或打包独立桌面软件。
 

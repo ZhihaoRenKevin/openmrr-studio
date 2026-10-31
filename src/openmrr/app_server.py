@@ -48,6 +48,7 @@ from .hardware_accel import detect_hardware_profile, run_compute_benchmark
 from .materials import (
     MATERIAL_CATALOG,
     T_REF_K,
+    WAVEBAND_PRESETS,
     evaluate_material_dispersion_table,
     get_material_fn,
 )
@@ -106,13 +107,13 @@ async def api_materials(_request: Request) -> JSONResponse:
             "typical_loss_db_cm": meta["typical_loss_db_cm"],
             "ref_props": props,
         })
-    return JSONResponse({"materials": items, "topologies": TOPOLOGY_CATALOG})
+    return JSONResponse({"materials": items, "topologies": TOPOLOGY_CATALOG, "wavebands": WAVEBAND_PRESETS})
 
 
 async def api_material_dispersion(request: Request) -> JSONResponse:
     key = request.query_params.get("key", "4H-SiC")
-    wmin = float(request.query_params.get("wmin", "450"))
-    wmax = float(request.query_params.get("wmax", "4500"))
+    wmin = float(request.query_params.get("wmin", "380"))
+    wmax = float(request.query_params.get("wmax", "10000"))
     try:
         table = evaluate_material_dispersion_table(key, wavelength_min_nm=wmin, wavelength_max_nm=wmax)
         return JSONResponse(table)
@@ -200,27 +201,37 @@ def _solve_mode_sync(payload: dict) -> dict:
     clad_fn = get_material_fn(str(payload.get("clad_material", "SiO2")))
     top_fn = get_material_fn(str(payload.get("top_clad_material", "SiO2")))
 
+    wl_nm = float(payload.get("wavelength_nm", 1550.0))
+    wl_m = wl_nm * 1e-9
+    wl_um = wl_nm * 1e-3
+    wl_scale = float(np.clip(wl_nm / 1550.0, 0.35, 4.50))
+    w_bot = float(payload.get("w_bottom_um", 1.2))
+    box_pad = max(1.8, 1.35 * wl_um)
+
     spec = WaveguideCrossSectionSpec(
-        w_bottom_um=float(payload.get("w_bottom_um", 1.2)),
+        w_bottom_um=w_bot,
         h_film_um=float(payload.get("h_film_um", 0.4)),
         h_slab_um=float(payload.get("h_slab_um", 0.0)),
         sidewall_deg=float(payload.get("sidewall_deg", 85.0)),
         core_material_fn=core_fn,
         clad_material_fn=clad_fn,
         top_clad_material_fn=top_fn,
-        domain_width_um=max(5.0, float(payload.get("w_bottom_um", 1.2)) + 3.6),
+        domain_width_um=max(3.6 * wl_scale, w_bot + 2.4 * wl_um),
+        h_box_um=box_pad,
+        h_top_clad_um=box_pad,
     )
 
-    wl_m = float(payload.get("wavelength_nm", 1550.0)) * 1e-9
     r_um = float(payload.get("bend_radius_um", 0.0))
     bend_m = math.inf if r_um <= 0.0 else (r_um * 1e-6)
     n_modes = int(payload.get("num_modes", 4))
-    res_um = float(payload.get("core_mesh_res_um", 0.040))
+    raw_res = float(payload.get("core_mesh_res_um", 0.040))
+    res_um = round(float(np.clip(raw_res * wl_scale, 0.016, 0.160)), 4)
+    grid_step = round(float(np.clip(0.040 * wl_scale, 0.018, 0.120)), 4)
     backend = str(payload.get("solver_backend", "fem"))
 
     if backend == "fde":
         modes = solve_modes_fde_tidy3d(
-            spec, wl_m, bend_radius_m=bend_m, num_modes=n_modes, core_dl_um=max(res_um * 0.65, 0.020)
+            spec, wl_m, bend_radius_m=bend_m, num_modes=n_modes, core_dl_um=max(res_um * 0.65, 0.012)
         )
     else:
         modes = solve_modes_fem(
@@ -229,7 +240,8 @@ def _solve_mode_sync(payload: dict) -> dict:
             bend_radius_m=bend_m,
             num_modes=n_modes,
             core_mesh_res_um=res_um,
-            eval_grid_step_um=0.045,
+            clad_mesh_res_um=max(res_um * 5.0, 0.15 * wl_scale),
+            eval_grid_step_um=grid_step,
             mesh_backend="bsd_conformal",
         )
 

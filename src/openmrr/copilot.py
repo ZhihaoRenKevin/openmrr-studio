@@ -184,15 +184,122 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "ring_width_um": 2.10,
         "bus_width_um": 1.80,
         "ring_radius_um": 65.0,
-        "gap_thru_um": 0.35,
-        "gap_drop_um": 0.35,
-        "clad_material": "Al2O3",
+        "gap_thru_um": 0.40,
+        "gap_drop_um": 0.40,
+        "clad_material": "CaF2",
         "top_clad_material": "Air",
         "wavelength_nm": 4200.0,
         "span_nm": 35.0,
         "w_sweep": (1.10, 3.20),
     },
+    "TiO2": {
+        "film_height_um": 0.18,
+        "slab_height_um": 0.0,
+        "sidewall_deg": 85.0,
+        "ring_width_um": 0.38,
+        "bus_width_um": 0.32,
+        "ring_radius_um": 20.0,
+        "gap_thru_um": 0.14,
+        "gap_drop_um": 0.14,
+        "clad_material": "SiO2",
+        "top_clad_material": "SiO2",
+        "wavelength_nm": 633.0,
+        "span_nm": 4.0,
+        "w_sweep": (0.20, 0.65),
+    },
+    "Ta2O5": {
+        "film_height_um": 0.22,
+        "slab_height_um": 0.0,
+        "sidewall_deg": 85.0,
+        "ring_width_um": 0.55,
+        "bus_width_um": 0.48,
+        "ring_radius_um": 30.0,
+        "gap_thru_um": 0.18,
+        "gap_drop_um": 0.18,
+        "clad_material": "SiO2",
+        "top_clad_material": "SiO2",
+        "wavelength_nm": 780.0,
+        "span_nm": 5.0,
+        "w_sweep": (0.30, 0.95),
+    },
+    "GaN": {
+        "film_height_um": 0.30,
+        "slab_height_um": 0.05,
+        "sidewall_deg": 80.0,
+        "ring_width_um": 0.52,
+        "bus_width_um": 0.45,
+        "ring_radius_um": 30.0,
+        "gap_thru_um": 0.16,
+        "gap_drop_um": 0.16,
+        "clad_material": "Al2O3",
+        "top_clad_material": "Air",
+        "wavelength_nm": 780.0,
+        "span_nm": 5.0,
+        "w_sweep": (0.28, 0.90),
+    },
+    "Diamond": {
+        "film_height_um": 0.25,
+        "slab_height_um": 0.0,
+        "sidewall_deg": 85.0,
+        "ring_width_um": 0.42,
+        "bus_width_um": 0.36,
+        "ring_radius_um": 25.0,
+        "gap_thru_um": 0.15,
+        "gap_drop_um": 0.15,
+        "clad_material": "SiO2",
+        "top_clad_material": "Air",
+        "wavelength_nm": 737.0,
+        "span_nm": 4.5,
+        "w_sweep": (0.22, 0.78),
+    },
 }
+
+
+def scale_preset_for_wavelength(cfg_dict: dict, new_wl_nm: float, explicit_keys: set[str]) -> tuple[float, float]:
+    """Scale waveguide cross-section, gap, cladding & span for Visible / 1310 / 1550 / SWIR / Mid-IR."""
+    mat = cfg_dict.get("core_material", "Si3N4")
+    preset_key = "ScAlN_20" if mat.startswith("ScAlN") else mat
+    base = PLATFORM_PRESETS.get(preset_key, PLATFORM_PRESETS["Si3N4"])
+    ref_wl = float(base.get("wavelength_nm", 1550.0))
+    ratio = float(new_wl_nm) / max(ref_wl, 200.0)
+
+    if abs(ratio - 1.0) > 0.06:
+        # Keep standard 220 nm SOI thickness across O-band (1310) & C-band (1550) unless Mid-IR
+        if "film_height_um" not in explicit_keys:
+            if mat == "Si" and 1200.0 <= new_wl_nm <= 1680.0:
+                cfg_dict["film_height_um"] = 0.22
+            else:
+                cfg_dict["film_height_um"] = round(float(np.clip(base["film_height_um"] * (ratio ** 0.88), 0.10, 3.20)), 3)
+            if base.get("slab_height_um", 0.0) > 0 and "slab_height_um" not in explicit_keys:
+                cfg_dict["slab_height_um"] = round(cfg_dict["film_height_um"] * (base["slab_height_um"] / base["film_height_um"]), 3)
+        if "ring_width_um" not in explicit_keys:
+            cfg_dict["ring_width_um"] = round(float(np.clip(base["ring_width_um"] * (ratio ** 0.90), 0.24, 4.50)), 3)
+        if "bus_width_um" not in explicit_keys:
+            cfg_dict["bus_width_um"] = round(float(np.clip(base["bus_width_um"] * (ratio ** 0.90), 0.20, 4.00)), 3)
+        if "gap_thru_um" not in explicit_keys:
+            g_sc = round(float(np.clip(base["gap_thru_um"] * (ratio ** 0.72), 0.10, 1.20)), 3)
+            cfg_dict["gap_thru_um"] = g_sc
+            cfg_dict["gap_drop_um"] = g_sc
+        if "ring_radius_um" not in explicit_keys:
+            cfg_dict["ring_radius_um"] = round(float(np.clip(base["ring_radius_um"] * (ratio ** 0.65), 10.0, 200.0)), 1)
+
+    # Auto-switch cladding away from SiO2 in Mid-IR (>3600 nm) where SiO2 has multiphonon absorption
+    if new_wl_nm > 3600.0:
+        if "clad_material" not in explicit_keys and cfg_dict.get("clad_material") == "SiO2":
+            cfg_dict["clad_material"] = "Si" if mat == "Ge" and new_wl_nm > 5500.0 else "CaF2"
+        if "top_clad_material" not in explicit_keys and cfg_dict.get("top_clad_material") == "SiO2":
+            cfg_dict["top_clad_material"] = "Air"
+
+    # Scale spectrum window span_nm as ~lambda^2 so 2-3 FSRs stay cleanly visible from 532 nm to 8000 nm
+    if "span_nm" not in explicit_keys:
+        est_span = 12.0 * ((new_wl_nm / 1550.0) ** 1.85)
+        cfg_dict["span_nm"] = round(float(np.clip(est_span, 1.8, 90.0)), 2)
+
+    w_lo, w_hi = base.get("w_sweep", (0.45, 1.80))
+    return (
+        round(max(0.16, w_lo * (ratio ** 0.90)), 3),
+        round(min(6.00, w_hi * (ratio ** 0.90)), 3),
+    )
 
 
 def create_initial_session() -> dict:
@@ -218,14 +325,16 @@ def create_initial_session() -> dict:
 
 
 def get_welcome_chips() -> list[dict[str, str]]:
-    """Starter quick-reply chips shown when a user opens the Copilot."""
+    """Starter quick-reply chips spanning Visible, O-Band (1310 nm), C-Band (1550 nm) & Mid-IR."""
     return [
-        {"label": "220 nm SOI (TE0, 1550 nm)", "prompt": "Design on 220 nm SOI, strip waveguide, SiO2 clad, TE0 at 1550 nm"},
-        {"label": "400 nm Si3N4 Low-Loss", "prompt": "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm"},
-        {"label": "600 nm 4H-SiC Pulley MRR", "prompt": "600 nm 4H-SiC strip, SiO2 clad, TE0 at 1550 nm, pulley all-pass"},
-        {"label": "600 nm X-cut TFLN EO Racetrack", "prompt": "600 nm X-cut TFLN with 300 nm slab, SiO2 clad, TE0 at 1550 nm, racetrack"},
-        {"label": "800 nm ScAlN (20% Sc) Rib", "prompt": "800 nm ScAlN 20% with 200 nm slab, SiO2 clad, TE0 at 1550 nm"},
-        {"label": "Mid-IR Ge @ 4.2 um", "prompt": "1400 nm Ge with 300 nm slab on Al2O3, air clad, TE0 at 4200 nm"},
+        {"label": "Visible 532 nm · Si3N4", "prompt": "180 nm Si3N4 strip, SiO2 clad, TE0 at 532 nm"},
+        {"label": "Quantum 780 nm · TiO2 / AlN", "prompt": "220 nm TiO2 strip, SiO2 clad, TE0 at 780 nm"},
+        {"label": "O-Band 1310 nm · 220nm SOI", "prompt": "220 nm SOI strip, SiO2 clad, TE0 at 1310 nm"},
+        {"label": "C-Band 1550 nm · 400nm Si3N4", "prompt": "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm"},
+        {"label": "1550 nm · 600nm 4H-SiC Pulley", "prompt": "600 nm 4H-SiC strip, SiO2 clad, TE0 at 1550 nm, pulley all-pass"},
+        {"label": "1550 nm · X-cut TFLN Racetrack", "prompt": "600 nm X-cut TFLN with 300 nm slab, SiO2 clad, TE0 at 1550 nm, racetrack"},
+        {"label": "Mid-IR 4.2 um · Ge on CaF2", "prompt": "1400 nm Ge with 300 nm slab on CaF2, air clad, TE0 at 4200 nm"},
+        {"label": "LWIR 7.5 um · Ge on Si", "prompt": "2200 nm Ge strip on Si substrate, air clad, TE0 at 7500 nm"},
     ]
 
 
@@ -279,6 +388,14 @@ def parse_photonics_intent(message: str) -> dict:
         mat = "LN_Zcut"
     elif re.search(r"\b(tfln|linbo3|lithium niobate|ln)\b|铌酸锂", low):
         mat = "LN_Xcut"
+    elif re.search(r"\btio2\b|titanium dioxide|二氧化钛", low):
+        mat = "TiO2"
+    elif re.search(r"\bta2o5\b|tantala|tantalum|五氧化二钽", low):
+        mat = "Ta2O5"
+    elif re.search(r"\bgan\b|gallium nitride|氮化镓", low):
+        mat = "GaN"
+    elif re.search(r"\bdiamond\b|金刚石", low):
+        mat = "Diamond"
     elif re.search(r"\baln\b|aluminum nitride|aluminium nitride|氮化铝", low):
         mat = "AlN"
     elif re.search(r"\bgsst\b|phase[-_\s]*change|相变", low):
@@ -291,14 +408,20 @@ def parse_photonics_intent(message: str) -> dict:
     if mat:
         out["fields"]["core_material"] = mat
 
-    # 2. Cladding
+    # 2. Cladding & Substrate (SiO2, Air, Al2O3, CaF2, MgF2, Si for Ge-on-Si)
     if re.search(r"air[-_\s]*(clad|top)|unclad|空气包层|无上包层", low):
         out["fields"]["top_clad_material"] = "Air"
     elif re.search(r"(sio2|oxide|silica)[-_\s]*(clad|top)|二氧化硅包层|氧化物包层", low):
         out["fields"]["top_clad_material"] = "SiO2"
         out["fields"]["clad_material"] = "SiO2"
-    if re.search(r"on\s+al2o3|sapphire|蓝宝石基底", low):
+    if re.search(r"on\s+caf2|caf2|氟化钙", low):
+        out["fields"]["clad_material"] = "CaF2"
+    elif re.search(r"on\s+mgf2|mgf2|氟化镁", low):
+        out["fields"]["clad_material"] = "MgF2"
+    elif re.search(r"on\s+al2o3|sapphire|蓝宝石基底", low):
         out["fields"]["clad_material"] = "Al2O3"
+    elif mat == "Ge" and re.search(r"on\s+si\b|ge[-_\s]*on[-_\s]*si|硅基底", low):
+        out["fields"]["clad_material"] = "Si"
 
     # 3. Polarization
     if re.search(r"\btm0?\b|横磁", low):
@@ -306,25 +429,38 @@ def parse_photonics_intent(message: str) -> dict:
     elif re.search(r"\bte0?\b|横电", low):
         out["fields"]["polarization"] = "TE0"
 
-    # 4. Wavelength (e.g., "@ 1550 nm", "at 780 nm", "wavelength 1310 nm", "4.2 um")
+    # 4. Wavelength & Named Wavebands (Visible 400-850 nm, O-band 1310 nm, C-band 1550 nm, SWIR 2000 nm, Mid-IR 3-12 um)
     wl_m = (
         re.search(r"(?:wavelength|wl|lambda|@|\bat\b|波长)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
-        or re.search(r"\b(736|750|780|850|980|1064|1310|1530|1550|2000|3800|4200)(?:\.\d+)?\s*(nm)\b", low)
+        or re.search(r"\b(405|450|488|532|633|637|736|737|750|780|850|980|1064|1270|1310|1330|1530|1550|1625|2000|2100|3300|3800|4200|4500|5200|7500|8000)(?:\.\d+)?\s*(nm)?\b", low)
     )
     if wl_m:
-        val, unit = float(wl_m.group(1)), wl_m.group(2)
+        val = float(wl_m.group(1))
+        unit = wl_m.group(2) or "nm"
         wl_nm = val * 1000.0 if unit in ("um", "µm") else val
-        if 380.0 <= wl_nm <= 12000.0:
+        if 350.0 <= wl_nm <= 14000.0:
             out["fields"]["wavelength_nm"] = round(wl_nm, 3)
+    elif re.search(r"\bo[-_\s]*band\b|o波段", low):
+        out["fields"]["wavelength_nm"] = 1310.0
+    elif re.search(r"\bc[-_\s]*band\b|c波段", low):
+        out["fields"]["wavelength_nm"] = 1550.0
+    elif re.search(r"\blwir\b|长波红外", low):
+        out["fields"]["wavelength_nm"] = 7500.0
+    elif re.search(r"\bmid[-_\s]*ir\b|\bmir\b|中红外", low):
+        out["fields"]["wavelength_nm"] = 4200.0
+    elif re.search(r"\bswir\b|2[-_\s]*um\b|2[-_\s]*µm\b", low):
+        out["fields"]["wavelength_nm"] = 2000.0
+    elif re.search(r"\bvisible\b|可见光", low):
+        out["fields"]["wavelength_nm"] = 532.0
 
     # 5. Film height H_film & Slab height H_slab & Sidewall angle
-    # Pattern like "220 nm SOI", "400nm Si3N4", "600 nm 4H-SiC", "H_film = 500 nm", "film 0.4 um"
+    # Pattern like "220 nm SOI", "400nm Si3N4", "1400 nm Ge", "H_film = 500 nm", "film 0.4 um"
     h_explicit = re.search(
         r"(?:h_?film|film(?:\s*height|\s*thickness)?|thickness|core\s*height|膜厚|厚度)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)",
         low,
     )
     h_prefix = re.search(
-        r"\b(\d+(?:\.\d+)?)\s*(nm|um|µm)\s+(?:soi|si3n4|sin|4h-sic|3c-sic|sic|aln|scaln|x-cut|z-cut|tfln|ln|ge|a-si|si\b)",
+        r"\b(\d+(?:\.\d+)?)\s*(nm|um|µm)\s+(?:soi|si3n4|sin|tio2|ta2o5|gan|diamond|4h-sic|3c-sic|sic|aln|scaln|x-cut|z-cut|tfln|ln|ge|a-si|si\b)",
         low,
     )
     if h_explicit:
@@ -670,9 +806,11 @@ def process_chat_turn(
         confirmed.add("core_material")
 
     # Apply parsed fields
+    explicit_keys = set(intent["fields"].keys())
+    prev_wl = float(cfg_dict.get("wavelength_nm", 1550.0))
     for k, v in intent["fields"].items():
         cfg_dict[k] = v
-        if k in ("film_height_um", "slab_height_um", "sidewall_deg", "top_clad_material"):
+        if k in ("film_height_um", "slab_height_um", "sidewall_deg", "top_clad_material", "clad_material"):
             confirmed.add("wafer_stack")
         if k == "polarization":
             confirmed.add("polarization")
@@ -682,6 +820,14 @@ def process_chat_turn(
             confirmed.add("resonator_size")
         if k in ("ring_width_um", "bus_width_um"):
             confirmed.add("explicit_widths")
+
+    # Scale defaults if user selected a non-default waveband (Visible / 1310 / SWIR / Mid-IR)
+    scaled_w_sweep: tuple[float, float] | None = None
+    if "wavelength_nm" in explicit_keys and "uploaded_gds" not in confirmed:
+        new_wl = float(cfg_dict["wavelength_nm"])
+        if abs(new_wl - prev_wl) > 25.0 or new_mat is not None:
+            scaled_w_sweep = scale_preset_for_wavelength(cfg_dict, new_wl, explicit_keys)
+            session["last_width_sweep"] = None
 
     # Handle port count toggle (`4-port add-drop` vs `2-port all-pass`) without changing coupler type
     if "ports" in intent["targets"] and "topology" not in intent["fields"]:
@@ -801,7 +947,7 @@ def process_chat_turn(
     # Direct Action 3: Waveguide Width Dispersion & Single-Mode Check
     # ------------------------------------------------------------------
     preset_key = "ScAlN_20" if cfg.core_material.startswith("ScAlN") else cfg.core_material
-    w_min_def, w_max_def = PLATFORM_PRESETS.get(preset_key, {"w_sweep": (0.45, 1.80)})["w_sweep"]
+    w_min_def, w_max_def = scaled_w_sweep or PLATFORM_PRESETS.get(preset_key, {"w_sweep": (0.45, 1.80)})["w_sweep"]
 
     should_run_width_sweep = (
         intent["action"] == "sweep_width"
@@ -972,6 +1118,10 @@ def process_chat_turn(
         f"- **Coupling Regime**: `{cc['regime']}` (`ER = {m['ER_thru_dB']:.1f} dB`, `kappa^2 = {m['kappa_power_thru']:.4f}`)\n"
         f"- **Critical-Coupling Target**: **`{cc['parameter']} = {cc['recommended_value']} {cc['unit']}`**"
     )
+    if mrr_res.get("wavelength_warnings"):
+        summary += "\n\n**Wavelength / Material Compatibility Notice**:\n" + "\n".join(
+            f"- {w}" for w in mrr_res["wavelength_warnings"]
+        )
     if use_ollama:
         compact_kpi = (
             f"{cfg.topology} {cfg.core_material} H={cfg.film_height_um}um W={cfg.ring_width_um}um "

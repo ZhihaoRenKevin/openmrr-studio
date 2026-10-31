@@ -431,7 +431,7 @@ details summary {
     <button class="tab-btn" data-tab="tab-gds" onclick="switchTab('tab-gds')">2. GDS Upload &amp; Mask Creator</button>
     <button class="tab-btn" data-tab="tab-mode" onclick="switchTab('tab-mode')">3. 2D Eigenmode &amp; Width Advisor</button>
     <button class="tab-btn" data-tab="tab-fit" onclick="switchTab('tab-fit')">4. Lab Spectrum CMT Fitter</button>
-    <button class="tab-btn" data-tab="tab-mat" onclick="switchTab('tab-mat')">5. 18-Material &amp; GPU/CPU</button>
+    <button class="tab-btn" data-tab="tab-mat" onclick="switchTab('tab-mat')">5. 24-Material &amp; GPU/CPU</button>
   </div>
   <div class="status-badges">
     <span class="badge green" id="hw-badge">Probing Compute...</span>
@@ -477,40 +477,73 @@ details summary {
 
       <div class="card">
         <details open>
-          <summary>Manual Wafer Stack, Resonator Geometry &amp; Parameter Sweep Controls (Live-Synced with Copilot)</summary>
+          <summary>Manual Wafer Stack, Waveband (Visible / 1310 / 1550 / Mid-IR) &amp; Resonator Controls (Live-Synced)</summary>
           <div class="param-grid" style="margin-top:9px;">
             <div class="field" style="grid-column: span 2;"><label>Topology</label><select id="cfg-topology"></select></div>
             <div class="field"><label>Core Material</label><select id="cfg-material"></select></div>
-            <div class="field"><label>Top Cladding</label><select id="cfg-topclad"><option value="SiO2">SiO2</option><option value="Air">Air</option></select></div>
+            <div class="field"><label>Bottom Clad / Sub</label>
+              <select id="cfg-clad">
+                <option value="SiO2">SiO2 (BOX &le;3.6 um)</option>
+                <option value="CaF2">CaF2 (Mid-IR &le;9.5 um)</option>
+                <option value="MgF2">MgF2 (Mid-IR &le;7.5 um)</option>
+                <option value="Al2O3">Al2O3 / Sapphire (&le;5.5 um)</option>
+                <option value="Si">Si (for Ge-on-Si MIR)</option>
+                <option value="Air">Air / Suspended</option>
+              </select>
+            </div>
+            <div class="field"><label>Top Cladding</label>
+              <select id="cfg-topclad">
+                <option value="SiO2">SiO2</option>
+                <option value="Air">Air</option>
+                <option value="CaF2">CaF2</option>
+                <option value="MgF2">MgF2</option>
+                <option value="Al2O3">Al2O3</option>
+              </select>
+            </div>
             <div class="field"><label>Polarization</label><select id="cfg-pol"><option value="TE0">TE0</option><option value="TM0">TM0</option></select></div>
-            <div class="field"><label>Wavelength [nm]</label><input type="number" id="cfg-wl" value="1550" step="1"/></div>
+            <div class="field"><label>Waveband Preset</label>
+              <select id="cfg-band" onchange="applyWavebandPresetUI(this.value)">
+                <option value="custom">Custom Wavelength</option>
+                <option value="532">Visible 532 nm</option>
+                <option value="633">Visible 633 nm</option>
+                <option value="780">VNIR / Quantum 780 nm</option>
+                <option value="1310">O-Band 1310 nm</option>
+                <option value="1550" selected>C-Band 1550 nm</option>
+                <option value="2000">SWIR 2000 nm</option>
+                <option value="3800">Mid-IR 3800 nm</option>
+                <option value="4200">Mid-IR 4200 nm (CO2)</option>
+                <option value="7500">LWIR 7500 nm (Ge/Si)</option>
+              </select>
+            </div>
+            <div class="field"><label>Wavelength [nm]</label><input type="number" id="cfg-wl" value="1550" min="350" max="14000" step="1"/></div>
+
             <div class="field"><label>H_film [um]</label><input type="number" id="cfg-hfilm" value="0.40" step="0.02"/></div>
             <div class="field"><label>H_slab [um]</label><input type="number" id="cfg-hslab" value="0.00" step="0.02"/></div>
-
             <div class="field"><label>Sidewall [deg]</label><input type="number" id="cfg-sw" value="85" step="1"/></div>
             <div class="field"><label>W_ring [um]</label><input type="number" id="cfg-wring" value="1.20" step="0.05"/></div>
             <div class="field"><label>W_bus [um]</label><input type="number" id="cfg-wbus" value="1.00" step="0.05"/></div>
             <div class="field"><label>Radius R1 [um]</label><input type="number" id="cfg-r1" value="40.0" step="2.0"/></div>
             <div class="field"><label>Gap_thru [um]</label><input type="number" id="cfg-gap" value="0.25" step="0.01"/></div>
             <div class="field"><label>L_s [um] (Racetrack)</label><input type="number" id="cfg-ls" value="12.0" step="1.0"/></div>
+
             <div class="field"><label>theta_pulley [deg]</label><input type="number" id="cfg-theta" value="25.0" step="2.0"/></div>
             <div class="field"><label>Loss [dB/cm]</label><input type="number" id="cfg-loss" placeholder="Auto" step="0.1"/></div>
-
             <div class="field"><label>Delta_T [K]</label><input type="number" id="cfg-dt" value="0.0" step="5.0"/></div>
             <div class="field"><label>Voltage [V]</label><input type="number" id="cfg-volt" value="0.0" step="2.0"/></div>
             <div class="field"><label>R2 [um] (Vernier)</label><input type="number" id="cfg-r2" value="42.5" step="0.5"/></div>
             <div class="field"><label>Span [nm]</label><input type="number" id="cfg-span" value="12.0" step="2.0"/></div>
-            <div class="field" style="grid-column: span 4;">
+            <div class="field" style="grid-column: span 2;">
               <label>Actions &amp; Parameter Sweeps</label>
               <div class="btn-row">
-                <button class="btn primary" onclick="runManualMRR()">▶ Simulate MRR</button>
-                <button class="btn amber" onclick="sendChatPrompt('Apply critical coupling')">⚡ Critical Couple</button>
+                <button class="btn primary" onclick="runManualMRR()">▶ Simulate</button>
+                <button class="btn amber" onclick="sendChatPrompt('Apply critical coupling')">⚡ Crit. Couple</button>
                 <button class="btn" onclick="sendChatPrompt('Sweep gap')">Sweep Gap</button>
-                <button class="btn" onclick="sendChatPrompt('Export single GDS layout')">💾 Export .GDS</button>
+                <button class="btn" onclick="sendChatPrompt('Export single GDS layout')">💾 .GDS</button>
                 <button class="btn" onclick="exportSpectrumCSV()">📥 CSV</button>
               </div>
             </div>
           </div>
+          <div id="wl-warning-bar" style="display:none;margin-top:8px;padding:6px 10px;border-radius:6px;background:rgba(248,113,113,0.14);border:1px solid rgba(248,113,113,0.5);color:#fecaca;font-size:11.5px;"></div>
         </details>
       </div>
 
@@ -689,7 +722,7 @@ details summary {
       <div class="two-col">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">18 Clean-Room Photonics Materials Dispersion</span>
+            <span class="card-title">24 Clean-Room Photonics Materials Dispersion (Visible 400 nm &rarr; Mid-IR 14 &mu;m)</span>
             <select id="mat-browser-sel" onchange="loadMaterialCurve()" style="background:var(--bg-input);color:#fff;border:1px solid var(--border);border-radius:4px;padding:3px 7px;"></select>
           </div>
           <canvas class="plot-canvas" id="cv-mat" style="height:240px;"></canvas>
@@ -791,9 +824,16 @@ function syncFormFromConfig(cfg) {
   const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null) el.value = v; };
   setVal('cfg-topology', cfg.topology);
   setVal('cfg-material', cfg.core_material);
+  setVal('cfg-clad', cfg.clad_material || 'SiO2');
   setVal('cfg-topclad', cfg.top_clad_material);
   setVal('cfg-pol', cfg.polarization);
   setVal('cfg-wl', cfg.wavelength_nm);
+  const bandEl = document.getElementById('cfg-band');
+  if (bandEl && cfg.wavelength_nm !== undefined) {
+    const known = ['532', '633', '780', '1310', '1550', '2000', '3800', '4200', '7500'];
+    const sWl = String(Math.round(cfg.wavelength_nm));
+    bandEl.value = known.includes(sWl) ? sWl : 'custom';
+  }
   setVal('cfg-hfilm', cfg.film_height_um);
   setVal('cfg-hslab', cfg.slab_height_um);
   setVal('cfg-sw', cfg.sidewall_deg);
@@ -812,13 +852,42 @@ function syncFormFromConfig(cfg) {
   renderSchematicsSVG(cfg);
 }
 
+function applyWavebandPresetUI(val) {
+  if (val === 'custom') return;
+  const wl = parseFloat(val);
+  document.getElementById('cfg-wl').value = wl;
+  let curMat = document.getElementById('cfg-material').value;
+  // Auto-select transparent core/cladding & physical single-mode geometry for chosen waveband
+  if (wl < 1050 && (curMat === 'Si' || curMat === 'Ge' || curMat === 'a-Si')) {
+    curMat = 'Si3N4';
+    document.getElementById('cfg-material').value = 'Si3N4';
+  } else if (wl > 5500 && curMat !== 'Ge' && curMat !== 'Diamond') {
+    curMat = 'Ge';
+    document.getElementById('cfg-material').value = 'Ge';
+  }
+  if (wl > 3650) {
+    document.getElementById('cfg-clad').value = (wl > 5500 && curMat === 'Ge') ? 'Si' : 'CaF2';
+    document.getElementById('cfg-topclad').value = 'Air';
+  } else {
+    document.getElementById('cfg-clad').value = 'SiO2';
+    document.getElementById('cfg-topclad').value = 'SiO2';
+  }
+  const r = wl / 1550.0;
+  document.getElementById('cfg-hfilm').value = (curMat === 'Si' && wl >= 1200 && wl <= 1680) ? 0.22 : Math.max(0.14, +(0.38 * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-wring').value = Math.max(0.28, +(((curMat === 'Si') ? 0.48 : 1.05) * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-wbus').value = Math.max(0.24, +(((curMat === 'Si') ? 0.42 : 0.90) * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-gap').value = Math.max(0.12, +(0.24 * Math.pow(r, 0.65)).toFixed(2));
+  document.getElementById('cfg-span').value = Math.max(2.0, +(12.0 * Math.pow(r, 1.80)).toFixed(1));
+  runManualMRR();
+}
+
 function readConfigFromForm() {
   const num = (id, fb) => { const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v) ? v : fb; };
   const lossRaw = document.getElementById('cfg-loss').value;
   return {
     topology: document.getElementById('cfg-topology').value,
     core_material: document.getElementById('cfg-material').value,
-    clad_material: (copilotSession && copilotSession.config && copilotSession.config.clad_material) || 'SiO2',
+    clad_material: (document.getElementById('cfg-clad') && document.getElementById('cfg-clad').value) || 'SiO2',
     top_clad_material: document.getElementById('cfg-topclad').value,
     polarization: document.getElementById('cfg-pol').value,
     wavelength_nm: num('cfg-wl', 1550),
@@ -1043,6 +1112,16 @@ async function runManualMRR() {
 function renderMrrResult(res) {
   const m = res.metrics;
   const cc = res.critical_coupling;
+  const wBar = document.getElementById('wl-warning-bar');
+  if (wBar) {
+    const warns = res.wavelength_warnings || [];
+    if (warns.length > 0) {
+      wBar.style.display = 'block';
+      wBar.textContent = '⚠ ' + warns.join(' | ');
+    } else {
+      wBar.style.display = 'none';
+    }
+  }
   document.getElementById('kpi-fsr').textContent = `${m.FSR_GHz.toFixed(2)} GHz`;
   document.getElementById('kpi-fsr-nm').textContent = `${m.FSR_nm.toFixed(3)} nm`;
   document.getElementById('kpi-ql').textContent = Math.round(m.Q_loaded).toLocaleString();
