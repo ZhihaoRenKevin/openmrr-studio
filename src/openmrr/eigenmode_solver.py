@@ -1,12 +1,12 @@
-"""Dual-Engine Full-Vector Waveguide & Bent-MRR Eigenmode Solver for macOS (ARM64).
+"""Dual-Engine Full-Vector Waveguide & Bent-MRR Eigenmode Solver (`openmrr.eigenmode_solver`).
 
 Provides two independent, cross-checkable open-source Maxwell eigenmode backends:
-  1. `fem` (`femwell` + `scikit-fem` + `gmsh`):
+  1. `fem` (100% Pure-BSD `conformal_mesher` + `scikit-fem`, zero GPL dependencies):
      Unstructured triangular mesh conforming exactly to angled sidewalls (e.g. 80 deg)
      and thin multilayer stacks, solved with 2nd-order curl-conforming Nedelec/Lagrange
      elements (`ElementTriN2 * ElementTriP2`) using exact cylindrical transformation
      optics for diagonal anisotropic crystals (`[n_x, n_y, n_z]`, bend radius `R`).
-  2. `fde` (`tidy3d` local CPU Yee-grid FDE `ModeSolver`):
+  2. `fde` (optional `tidy3d` local CPU Yee-grid FDE `ModeSolver` extra):
      Structured finite-difference eigenmode solver using identical Shapely cross-section
      polygons (`PolySlab`), `AnisotropicMedium`, and exact cylindrical `bend_radius`.
 
@@ -285,8 +285,8 @@ def solve_modes_fem(
       mu_tilde  = diag(rho, rho, 1 / rho)
 
     Args:
-      mesh_backend: `"bsd_conformal"` (default, 100% BSD-3-Clause GPL-free exact
-                    transfinite conformal mesher) or `"gmsh"` (optional `femwell`/`gmsh`).
+      mesh_backend: `"bsd_conformal"` (100% BSD-3-Clause GPL-free exact transfinite
+                    conformal mesher).
     """
     if spec.core_material_fn is None or spec.clad_material_fn is None:
         raise ValueError("WaveguideCrossSectionSpec requires core_material_fn and clad_material_fn")
@@ -306,29 +306,8 @@ def solve_modes_fem(
             core_mesh_res_um=core_mesh_res_um,
             clad_mesh_res_um=clad_mesh_res_um,
         )
-    elif mesh_backend == "gmsh":
-        from femwell.mesh import mesh_from_OrderedDict
-        resolutions: dict[str, dict[str, float]] = {}
-        if "core" in polygons:
-            resolutions["core"] = {"resolution": core_mesh_res_um, "distance": 0.6}
-        if "slab" in polygons:
-            resolutions["slab"] = {"resolution": min(core_mesh_res_um * 1.5, clad_mesh_res_um), "distance": 0.4}
-        if "upper_core" in polygons:
-            resolutions["upper_core"] = {"resolution": core_mesh_res_um, "distance": 0.5}
-        if "cap" in polygons:
-            resolutions["cap"] = {"resolution": min(core_mesh_res_um * 0.5, 0.015), "distance": 0.25}
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            msh_file = str(Path(tmpdir) / "wg_cross_section.msh")
-            mesh_from_OrderedDict(
-                polygons,
-                resolutions=resolutions,
-                filename=msh_file,
-                default_resolution_max=clad_mesh_res_um,
-            )
-            mesh = Mesh.load(msh_file).scaled(1e-6)  # scale from um to SI metres
     else:
-        raise ValueError(f"Unsupported mesh_backend '{mesh_backend}'; choose 'bsd_conformal' or 'gmsh'")
+        raise ValueError(f"Unsupported mesh_backend '{mesh_backend}'; use 'bsd_conformal'")
 
     if element_order == 1:
         elem = ElementTriN1() * ElementTriP1()

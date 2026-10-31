@@ -4,10 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openmrr-studio"
-version = "3.1.0"
+version = "3.2.0"
 description = "License-free conversational photonics microring designer (Visible 400 nm to Mid-IR 14 um): 2D full-vector Maxwell eigenmodes, spatial/temporal CMT, lab spectrum fitting, bidirectional GDSII layout bridge, and token-minimal AI agent MCP — without Lumerical, RSoft, or COMSOL."
 readme = "README.md"
 license = { text = "MIT" }
+authors = [
+  { name = "Zhihao Ren" },
+]
 requires-python = ">=3.11"
 keywords = [
   "integrated-photonics",
@@ -23,12 +26,6 @@ keywords = [
   "mid-infrared",
   "mcp-server",
 ]
-
-[project.urls]
-Homepage = "https://github.com/ZhihaoRenKevin/openmrr-studio"
-Repository = "https://github.com/ZhihaoRenKevin/openmrr-studio"
-Documentation = "https://github.com/ZhihaoRenKevin/openmrr-studio#readme"
-Issues = "https://github.com/ZhihaoRenKevin/openmrr-studio/issues"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
@@ -52,6 +49,13 @@ dependencies = [
   "anyio>=4.4",
   "matplotlib>=3.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ZhihaoRenKevin/openmrr-studio"
+Repository = "https://github.com/ZhihaoRenKevin/openmrr-studio"
+Documentation = "https://github.com/ZhihaoRenKevin/openmrr-studio#readme"
+Issues = "https://github.com/ZhihaoRenKevin/openmrr-studio/issues"
+Author-ORCID = "https://orcid.org/0000-0002-2520-0784"
 
 [project.optional-dependencies]
 desktop = [

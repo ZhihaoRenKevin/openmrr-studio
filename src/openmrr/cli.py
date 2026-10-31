@@ -87,6 +87,7 @@ def main() -> None:
     p_ad.add_argument("--theta", type=float, default=None, dest="theta_deg")
     p_ad.add_argument("--wl", type=float, default=None, dest="wl_nm")
     p_ad.add_argument("--pol", default=None)
+    p_ad.add_argument("--loss", type=float, default=None, dest="loss_db_cm", help="Propagation loss [dB/cm]")
     p_ad.add_argument("--fsr", type=float, default=None, dest="target_fsr_ghz")
     p_ad.add_argument("--cc", action="store_true", dest="apply_cc")
     p_ad.add_argument("--gds", action="store_true", dest="export_gds")

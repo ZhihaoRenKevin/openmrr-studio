@@ -36,7 +36,9 @@ from openmrr import (
     export_sweep_array_gds,
     fit_single_resonance_cmt,
     get_material_fn,
+    loss_db_per_cm_to_q_int,
     process_chat_turn,
+    q_int_to_loss_db_per_cm,
     run_compute_benchmark,
     run_mrr_parameter_sweep,
     run_waveguide_width_sweep,
@@ -195,50 +197,76 @@ def test_bidirectional_gds_roundtrip() -> None:
 def test_conversational_copilot_flow() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp_path = Path(td)
-        sess = create_initial_session()
+        # 1. Guided step-by-step wizard (1 question at a time + dB/cm propagation loss)
+        s0 = create_initial_session(lang="en")
+        g1 = process_chat_turn(s0, "Start step-by-step microring design", gds_export_dir=tmp_path)
+        assert g1["wizard_step"] == 2
+        g2 = process_chat_turn(g1["session"], "Wavelength = 1550 nm", gds_export_dir=tmp_path)
+        assert g2["wizard_step"] == 3
+        g3 = process_chat_turn(g2["session"], "Core material: Si3N4", gds_export_dir=tmp_path)
+        assert g3["wizard_step"] == 4
+        g4 = process_chat_turn(g3["session"], "Confirm stack and solve 2D modes", gds_export_dir=tmp_path)
+        assert "width_sweep_result" in g4 and g4["wizard_step"] == 5
+        g5 = process_chat_turn(g4["session"], "Propagation loss = 0.85 dB/cm", gds_export_dir=tmp_path)
+        assert g5["wizard_step"] == 5 and abs(g5["session"]["config"]["alpha_loss_db_per_cm"] - 0.85) < 1e-4
 
-        r1 = process_chat_turn(
-            sess,
-            "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm",
-            gds_export_dir=tmp_path,
-        )
-        assert "width_sweep_result" in r1
-        assert r1["session"]["stage"] == "mode_confirmed"
+        # Live EN -> ZH language switch mid-step without losing design state
+        g_lang = process_chat_turn(g5["session"], "__switch_lang__", gds_export_dir=tmp_path, lang="zh")
+        assert g_lang["session"]["lang"] == "zh"
+        assert abs(g_lang["session"]["config"]["alpha_loss_db_per_cm"] - 0.85) < 1e-4
 
-        r2 = process_chat_turn(
-            r1["session"],
-            "FSR 200 GHz, point circular all-pass",
-            gds_export_dir=tmp_path,
-        )
-        assert "mrr_result" in r2
-        fsr_hit = r2["mrr_result"]["metrics"]["FSR_GHz"]
+        g6 = process_chat_turn(g_lang["session"], "FSR 200 GHz, 点耦合两端口", gds_export_dir=tmp_path, lang="zh")
+        assert "mrr_result" in g6 and g6["wizard_step"] == 6
+        assert abs(g6["mrr_result"]["metrics"]["alpha_loss_db_per_cm"] - 0.85) < 1e-3
+        fsr_hit = g6["mrr_result"]["metrics"]["FSR_GHz"]
         assert 180.0 <= fsr_hit <= 220.0
 
-        r3 = process_chat_turn(r2["session"], "Apply critical coupling", gds_export_dir=tmp_path)
+        r3 = process_chat_turn(g6["session"], "Apply critical coupling", gds_export_dir=tmp_path, lang="en")
         assert r3["mrr_result"]["metrics"]["ER_thru_dB"] > 30.0
+
+        r_sw_loss = process_chat_turn(r3["session"], "Sweep propagation loss", gds_export_dir=tmp_path, lang="en")
+        assert "mrr_sweep_result" in r_sw_loss
+        assert r_sw_loss["mrr_sweep_result"]["param_name"] == "alpha_loss_db_per_cm"
 
         r4 = process_chat_turn(r3["session"], "Export single GDS layout", gds_export_dir=tmp_path)
         assert "gds_export" in r4
         assert Path(r4["gds_export"]["gds_path"]).is_file()
 
+        # 2. Fast-forward Chinese one-shot prompt
         r_zh = process_chat_turn(
-            create_initial_session(),
-            "220 nm SOI 跑道微环 四端口 FSR 150 GHz 开始仿真",
+            create_initial_session(lang="zh"),
+            "220 nm SOI 跑道微环 四端口 损耗 1.8 dB/cm FSR 150 GHz 开始仿真",
             gds_export_dir=tmp_path,
+            lang="zh",
         )
         assert r_zh["session"]["config"]["core_material"] == "Si"
         assert r_zh["session"]["config"]["topology"] == "racetrack_ad"
-        assert "mrr_result" in r_zh
+        assert abs(r_zh["mrr_result"]["metrics"]["alpha_loss_db_per_cm"] - 1.8) < 1e-3
 
 
 def test_cmt_spectrum_fitter() -> None:
+    # Exact bidirectional loss [dB/cm] <-> Q_int identity check
+    q_calc = loss_db_per_cm_to_q_int(0.75, ng=2.12, wavelength_nm=1550.0)
+    alpha_back = q_int_to_loss_db_per_cm(q_calc, ng=2.12, wavelength_nm=1550.0)
+    assert abs(alpha_back - 0.75) < 1e-6
+
     wl = np.linspace(1550.47, 1550.53, 300)
     tr = cmt_split_doublet_power(
         wl, 1550.500, kappa_int_ghz=0.18, kappa_ext_ghz=0.14, mu_split_ghz=0.26
     )
-    summary, _, _ = fit_single_resonance_cmt(wl, tr, model_type="auto", known_regime="undercoupled")
+    summary, _, _ = fit_single_resonance_cmt(
+        wl, tr, model_type="auto", known_regime="undercoupled", ng_assumed=2.10, ring_length_um=250.0
+    )
     assert summary.model_type == "split_doublet"
     assert summary.r_squared > 0.999
+    assert summary.alpha_loss_db_per_cm > 0.05
+
+    # Also test logarithmic dB/dBm trace auto-conversion
+    tr_dbm = -8.5 + 10.0 * np.log10(np.clip(tr, 1e-5, None))
+    summary_db, _, _ = fit_single_resonance_cmt(
+        wl, tr_dbm, model_type="split_doublet", known_regime="undercoupled", ng_assumed=2.10
+    )
+    assert abs(summary_db.alpha_loss_db_per_cm - summary.alpha_loss_db_per_cm) < 0.03
 
 
 def test_http_endpoints_and_gds_upload() -> None:
@@ -250,13 +278,21 @@ def test_http_endpoints_and_gds_upload() -> None:
             srv.GDS_UPLOAD_DIR = tmp_path / "uploads"
             try:
                 st, body = await _asgi_request("GET", "/")
-                assert st == 200 and b"OpenMRR Studio" in body
+                assert st == 200 and b"OpenMRR Studio" in body and b"setLanguage('zh')" in body
 
                 st, body = await _asgi_request("GET", "/api/materials")
                 assert st == 200 and len(json.loads(body)["materials"]) == 24
 
+                st, body_zh = await _asgi_request("POST", "/api/chat_init", query_string="lang=zh")
+                assert st == 200 and json.loads(body_zh)["session"]["lang"] == "zh"
+
                 st, body = await _asgi_request("POST", "/api/chat_init")
                 init = json.loads(body)
+
+                st, body = await _asgi_request("GET", "/api/ai_backends")
+                assert st == 200
+                ai_bk = json.loads(body)
+                assert ai_bk["offline"] is True and "claude_cli_available" in ai_bk and "codex_cli_available" in ai_bk
 
                 st, body = await _asgi_request(
                     "POST",
@@ -264,11 +300,12 @@ def test_http_endpoints_and_gds_upload() -> None:
                     json_body={
                         "session": init["session"],
                         "message": "220 nm SOI strip, TE0 at 1550 nm, R = 15 um, simulate",
+                        "ai_mode": "offline",
                     },
                 )
                 assert st == 200
                 chat = json.loads(body)
-                assert "mrr_result" in chat
+                assert "mrr_result" in chat and chat.get("ai_mode") == "offline"
 
                 st, body = await _asgi_request("POST", "/api/export_gds", json_body=chat["session"]["config"])
                 assert st == 200

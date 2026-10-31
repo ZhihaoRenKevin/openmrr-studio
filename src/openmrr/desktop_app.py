@@ -1,23 +1,36 @@
-"""Native Desktop & Browser Application Launcher for `OpenMRR Studio v3.0`.
+"""Native Desktop & Browser Application Launcher for `OpenMRR Studio v3.2`.
 
 Starts the local `127.0.0.1` Starlette/Uvicorn server in a background daemon thread
 and opens either:
   - A native OS window (`pywebview`: macOS Cocoa WebKit / Windows Edge WebView2), or
   - The user's default system browser (`--browser` fallback if `pywebview` is absent), or
-  - A self-terminating smoke test (`--headless-check`).
+  - A self-terminating smoke test (`--headless-check`, also verifying 2D FEM + GDS inside frozen apps).
 """
 from __future__ import annotations
 
 import argparse
+import json
+import multiprocessing
+import os
 import socket
+import sys
 import threading
 import time
 import urllib.request
 import webbrowser
 
+# Guard stdout/stderr in PyInstaller --windowed (.app / .exe) mode where streams may be None
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 import uvicorn
 
-from .app_server import app
+try:
+    from openmrr.app_server import app
+except ImportError:
+    from .app_server import app
 
 
 def _find_free_localhost_port(preferred: int = 8765) -> int:
@@ -31,11 +44,11 @@ def _find_free_localhost_port(preferred: int = 8765) -> int:
     raise RuntimeError("Could not bind any localhost port on 127.0.0.1.")
 
 
-def _wait_until_ready(url: str, timeout_s: float = 10.0) -> bool:
+def _wait_until_ready(url: str, timeout_s: float = 15.0) -> bool:
     deadline = time.perf_counter() + timeout_s
     while time.perf_counter() < deadline:
         try:
-            with urllib.request.urlopen(url + "/api/hardware", timeout=1.0) as resp:
+            with urllib.request.urlopen(url + "/api/hardware", timeout=1.5) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
@@ -43,36 +56,67 @@ def _wait_until_ready(url: str, timeout_s: float = 10.0) -> bool:
     return False
 
 
+def _run_headless_physics_check(url: str) -> None:
+    req = urllib.request.Request(
+        url + "/api/solve_mode",
+        data=json.dumps({
+            "core_material": "Si3N4",
+            "clad_material": "SiO2",
+            "top_clad_material": "SiO2",
+            "wavelength_nm": 1550.0,
+            "width_um": 1.0,
+            "film_height_um": 0.40,
+            "slab_height_um": 0.0,
+            "sidewall_deg": 88.0,
+            "bend_radius_um": 50.0,
+            "polarization": "TE0",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=25.0) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+        assert resp.status == 200 and payload.get("modes"), f"Unexpected mode payload: {payload}"
+
+
 def launch_studio(
     *,
     browser_only: bool = False,
     headless_check: bool = False,
+    no_open: bool = False,
     port: int | None = None,
 ) -> int:
     bind_port = port or _find_free_localhost_port()
     url = f"http://127.0.0.1:{bind_port}"
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=bind_port, log_level="warning")
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=bind_port,
+        log_level="warning",
+        log_config=None,
+    )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
     if not _wait_until_ready(url):
-        print(f"[OpenMRR] ERROR: Local backend at {url} failed to start within 10 s.")
+        print(f"[OpenMRR] ERROR: Local backend at {url} failed to start within 15 s.")
         return 1
 
     if headless_check:
-        print(f"[OpenMRR] Headless check PASSED on {url}")
+        _run_headless_physics_check(url)
+        print(f"[OpenMRR] Headless server + 2D FEM check PASSED on {url}")
         server.should_exit = True
         thread.join(timeout=3.0)
         return 0
 
-    if not browser_only:
+    if not browser_only and not no_open:
         try:
             import webview  # type: ignore
 
             webview.create_window(
-                "OpenMRR Studio v3.0 — Photonics Eigenmode, CMT & GDSII Suite",
+                "OpenMRR Studio v3.2 — License-Free Photonics Microring Designer",
                 url,
                 width=1460,
                 height=900,
@@ -84,8 +128,9 @@ def launch_studio(
         except Exception as exc:
             print(f"[OpenMRR] Native webview unavailable ({exc}); opening system browser at {url}")
 
-    print(f"[OpenMRR] Running at {url} — Press Ctrl+C to stop.")
-    webbrowser.open(url)
+    print(f"[OpenMRR] Running at {url} — Press Ctrl+C to stop.", flush=True)
+    if not no_open:
+        webbrowser.open(url)
     try:
         while thread.is_alive():
             time.sleep(0.5)
@@ -95,15 +140,18 @@ def launch_studio(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Launch OpenMRR Studio v3.0")
+    multiprocessing.freeze_support()
+    parser = argparse.ArgumentParser(description="Launch OpenMRR Studio v3.2")
     parser.add_argument("--browser", action="store_true", help="Open in default web browser instead of native window")
-    parser.add_argument("--headless-check", action="store_true", help="Verify local server startup and exit")
+    parser.add_argument("--no-open", action="store_true", help="Serve HTTP UI without opening a new browser window")
+    parser.add_argument("--headless-check", action="store_true", help="Verify local server + 2D FEM startup and exit")
     parser.add_argument("--port", type=int, default=None, help="Optional localhost port (default: auto 8765)")
     args = parser.parse_args()
     raise SystemExit(
         launch_studio(
             browser_only=args.browser,
             headless_check=args.headless_check,
+            no_open=args.no_open,
             port=args.port,
         )
     )

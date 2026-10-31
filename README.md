@@ -1,16 +1,15 @@
 # OpenMRR Studio
 
-**Design, sweep, fit, and lay out integrated photonic microring resonators — through a conversational AI copilot, interactive 2D workbench, and bidirectional GDSII bridge — with zero Ansys Lumerical, Synopsys RSoft, or COMSOL licenses.**
+**Design, sweep, fit, and lay out integrated photonic microring resonators through a conversational AI copilot, interactive 2D workbench, and bidirectional GDSII bridge, with zero Ansys Lumerical, Synopsys RSoft, or COMSOL licenses.**
 
 [English](./README.md) | [简体中文](./README_zh-CN.md) | [Verification & Benchmarks](./docs/VERIFICATION_AND_BENCHMARKS.md) | [Chatbot & GDS Tutorial](./docs/tutorials/chatbot_and_gds_guide.md) | [Codex & Claude MCP Guide](./docs/tutorials/ai_agents_codex_claude.md) | [llms.txt](./llms.txt) | [Changelog](./CHANGELOG.md)
 
+[![Run Online in Browser](https://img.shields.io/badge/Run_Online-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/ZhihaoRenKevin/openmrr-studio?quickstart=1)
+[![Desktop Installers: .dmg & .exe](https://img.shields.io/badge/Desktop_App-macOS_.dmg_%7C_Win_.exe-0284c7)](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest)
 [![Wavebands: 400nm–14µm](https://img.shields.io/badge/wavebands-400nm%20Vis%20to%2014%CE%BCm%20Mid--IR-ec4899.svg)](./docs/VERIFICATION_AND_BENCHMARKS.md)
-[![MCP Server: <150 tokens/call](https://img.shields.io/badge/MCP_Server-%3C150_tokens%2Fcall-f59e0b.svg)](./server.json)
+[![AI Modes: Offline | Claude | Codex | Ollama](https://img.shields.io/badge/AI_Modes-Offline_%7C_Claude_%7C_Codex_%7C_Ollama-8b5cf6.svg)](./docs/tutorials/ai_agents_codex_claude.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](./pyproject.toml)
-[![Solver: Pure-BSD Conformal FEM](https://img.shields.io/badge/eigenmode-scikit--fem%20(BSD)-0284c7.svg)](./src/openmrr/eigenmode_solver.py)
-[![Layout: Bidirectional GDSII](https://img.shields.io/badge/layout-gdstk%20%2B%20KLayout-6f42c1.svg)](./src/openmrr/gds_bridge.py)
-[![Compute: Apple Silicon AMX/MLX | CUDA | CPU](https://img.shields.io/badge/compute-Apple%20Silicon%20%7C%20CUDA%20%7C%20CPU-10b981.svg)](./src/openmrr/hardware_accel.py)
 
 ![OpenMRR Studio Overview](./docs/images/hero_openmrr_overview.png)
 *Overview generated directly by `scripts/generate_hero_figure.py` without commercial solvers: **(a)** 2D full-vector cylindrical bent FEM eigenmode (`4H-SiC`, `R = 40 um`, `82 deg` sidewall), **(b)** concentric wrap-around pulley coupler sweep & automatic critical-coupling synthesis (`theta_CC`), **(c)** `X-cut TFLN` electro-optic racetrack resonance tuning (`0 V` vs `+25 V`), and **(d)** post-fabrication CW/CCW backscattering split-doublet CMT parameter extraction.*
@@ -24,7 +23,10 @@ Most photonics students and engineers face two painful bottlenecks when designin
 2. **Layout-to-simulation disconnect**: A `.gds` mask drawn by a colleague in KLayout or `gdsfactory` has to be manually re-measured and re-typed into a mode solver, while simulation parameter sweeps rarely export directly into foundry-ready `.gds` test arrays.
 
 **OpenMRR Studio** solves both problems in a single 100% permissive (`MIT`/`BSD`) Python package and native desktop app:
-- **Conversational Photonics Copilot (English & 中文)**: Chat step-by-step about your target material, wafer stack (`H_film`, `H_slab`, sidewall angle, oxide vs air cladding), polarization (`TE0`/`TM0`), and target `FSR`/`Q`. The Copilot automatically runs 2D Maxwell width sweeps to find the single-mode cutoff, synthesizes the exact ring radius and critical-coupling gap/angle/length, runs tolerance sweeps, and exports `.gds` masks.
+- **6-Step Guided Bilingual Copilot (`EN | 中文`)**: A clean, zero-overload step-by-step assistant asking **one clear question at a time** (`1. Goal` → `2. Waveband` → `3. Material` → `4. Stack & 2D Mode` → `5. Propagation Loss dB/cm` → `6. Ring Topology, FSR & GDS`), with 1-click **`EN | 中文`** switching across all UI labels, choice chips, and responses (plus instant fast-forward when typing full specs).
+- **Bidirectional Propagation Loss (`dB/cm`) Design & Spectrum Extraction**:
+  - **Design from Known Loss (`dB/cm` $\rightarrow$ Critical Coupling)**: Enter your measured or foundry propagation loss $\alpha$ (`dB/cm`) or $Q_{\mathrm{int}}$, and OpenMRR converts $Q_{\mathrm{int}} = \frac{20\pi n_g}{\ln(10)\,\lambda\,\alpha}$ to synthesize the exact critical-coupling gap, pulley wrap angle $\theta_{\mathrm{CC}}$, or racetrack coupler length $L_{\mathrm{CC}}$, and sweeps performance across loss tolerances.
+  - **Extract Loss from Measured Spectra (`.CSV` $\rightarrow$ `dB/cm` $\rightarrow$ Design)**: Upload linear-power or logarithmic `dB`/`dBm` lab spectra to fit Lorentzian, CW/CCW backscattering split-doublet, Fano, or broadband multi-FSR traces (extracting both $n_g$ and $\alpha$ in `dB/cm`), then click **`🎯 Design Ring with α`** to feed your measured loss straight into new mask synthesis.
 - **Bidirectional GDSII / OASIS Bridge**:
   - **Upload `.gds` / `.oas` $\rightarrow$ Simulate**: Drop any microring `.gds` file into the app. OpenMRR merges core polygons (`gdstk` + `shapely`), detects whether the layout is a **Point-Coupled Circle**, **Racetrack**, **Concentric Pulley**, or **Dual-Ring Vernier**, measures `R`, `W_ring`, `W_bus`, `gap_thru`, `gap_drop`, `L_s`, and `pulley_angle` directly from the polygons, renders an interactive 2D GDS caliper viewer, and simulates the optical spectrum once you confirm the wafer thickness.
   - **Design / Sweep $\rightarrow$ Create `.gds` + KLayout `.lyp`**: Export either a single annotated resonator cell (with optical port pins `65/0`, TiN heater `10/0`, GSG pads `11/0`) or a multi-device **MPW parameter-sweep array `.gds`** plus a matching KLayout `.lyp` color file.
@@ -49,76 +51,149 @@ flowchart LR
 
 ---
 
-## Quick Start (macOS & Windows)
+## Installation & Launch: Offline Desktop OR Online Cloud / Claude / Codex
 
-We recommend [`uv`](https://docs.astral.sh/uv/) for a clean, reproducible Python 3.12 environment (standard `pip` also works).
+Zero Ansys Lumerical, COMSOL, or Synopsys RSoft licenses are required. Choose whichever way fits your workflow:
 
-### 1. Install `uv` (one-time) & Clone
+### Option 1: Install Offline Like Normal Desktop Software (`.dmg` & `.exe` - Zero Python Needed)
 
-```bash
-# macOS / Linux:
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Windows PowerShell:
-# irm https://astral.sh/uv/install.ps1 | iex
+Download the pre-built desktop installer from [**GitHub Releases**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest):
 
+| Operating System | Download Package | How to Install & Open |
+| :--- | :--- | :--- |
+| **macOS (Apple Silicon)** | [**`OpenMRR-Studio-v3.2.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | Open the `.dmg` and drag **`OpenMRR Studio.app`** into **`Applications`**. *(On first launch of an unsigned open-source app, right-click **`OpenMRR Studio.app`** $\rightarrow$ **Open**, or allow under **System Settings $\rightarrow$ Privacy & Security**.)* |
+| **Windows 10 / 11 (64-bit)** | **`OpenMRR-Studio-v3.2.0-Windows-Setup-x64.exe`** *(or Portable `.zip`)* | Double-click **`Setup.exe`** (no Admin password needed; creates Desktop & Start Menu shortcuts), or unzip the Portable `.zip` and run **`OpenMRR Studio.exe`**. *(If building from source on Windows, see Option 2 below: 1 double-click on `launchers\OpenMRR_Windows.bat`.)* |
+
+*(Exported `.gds` masks, `.lyp` color maps, and `.csv` spectra from the standalone desktop app are saved locally in `~/Documents/OpenMRR_Studio/`.)*
+
+---
+
+### Option 2: Run Online in Your Browser OR Connect `Claude` / `Codex`
+
+1. **Zero-Install Cloud Browser (`GitHub Codespaces`)**:
+   Click [**Run Online in GitHub Codespaces**](https://codespaces.new/ZhihaoRenKevin/openmrr-studio?quickstart=1). GitHub launches a cloud Python container and opens the full interactive OpenMRR Studio web workbench on port `8765` in your browser with zero local setup.
+2. **Switch Between Offline & Online AI Inside the Studio UI (`⚡ Offline` | `🖥 Ollama` | `🟣 Claude` | `🟢 Codex`)**:
+   Use the AI Mode selector right above the chat box at any time:
+   - **`⚡ Offline · Built-in Copilot` *(Default)***: 100% offline deterministic physics copilot (`0` tokens, works with no internet).
+   - **`🖥 Offline · Local Ollama / MLX`**: Connects locally to `Ollama` (`127.0.0.1:11434`) or `LM Studio` (`127.0.0.1:1234`) with zero cloud data transfer.
+   - **`🟣 Online · Claude` & `🟢 Online · Codex / OpenAI`**: Automatically uses your locally signed-in **`claude` (`Claude Code` CLI)** or **`codex` (`OpenAI Codex` CLI)** subscription with zero extra API key, or accepts an optional in-memory API key via **`🔑 Key`**. All 2D Maxwell FEM modes, CMT spectra, and `.GDS` masks are still solved locally for exact accuracy while sending `< 150 tokens` of summary state to Claude/Codex!
+3. **Run Directly Inside `Claude Code` or `Codex` Terminal/Desktop (`MCP` `< 150 tokens/call`)**:
+   Open the cloned `openmrr-studio` folder in **Claude Code** (`claude`) or **OpenAI Codex** (`codex`). Both agents automatically detect [`CLAUDE.md`](./CLAUDE.md), [`AGENTS.md`](./AGENTS.md), and [`.mcp.json`](./.mcp.json) to design rings, sweep gaps/losses, fit `.CSV` spectra, and export `.GDS` masks on command.
+
+---
+
+### Option 3: Download Source ZIP + 1-Click Auto-Setup Launcher (Python 3.11+)
+
+If you have **Python 3.11, 3.12, or 3.13** installed from [python.org/downloads](https://www.python.org/downloads/) *(on Windows, check **`Add python.exe to PATH`** during install)*:
+
+1. Click the green **`<> Code`** button at the top of this page $\rightarrow$ **`Download ZIP`**, and extract the `openmrr-studio` folder anywhere on your PC.
+2. Open `launchers/` and double-click the launcher for your OS:
+   - **Windows 10 / 11**: Double-click **`launchers\OpenMRR_Windows.bat`**
+   - **macOS**: Right-click **`launchers/OpenMRR_macOS.command`** $\rightarrow$ **Open**
+3. **First launch (~1 minute)**: Automatically creates `.venv`, installs all scientific Python packages, and opens **OpenMRR Studio** (subsequent launches open in `< 2 seconds`).
+
+---
+
+### Option 4: Developer / Python Scripting Setup (`git` + `pip`)
+
+#### On Windows 10 / 11 (`PowerShell` or `Command Prompt`)
+```powershell
 git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
 cd openmrr-studio
+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -U pip
+pip install -e ".[desktop]"
+
+# Launch the interactive Studio:
+openmrr
 ```
 
-### 2. Choose Your Platform Setup
-
-| Platform | Command | Notes |
-| :--- | :--- | :--- |
-| **macOS (Apple Silicon M1–M5 / Intel)** | `uv sync --extra desktop --extra apple` | Uses Apple Accelerate AMX + native Cocoa window |
-| **Windows / Linux (CPU-only Laptop)** | `uv sync --extra desktop` | Lightweight, zero GPU driver requirements |
-| **Windows / Linux (NVIDIA CUDA GPU)** | `uv sync --extra desktop --extra cuda` | Accelerates massive broadband sweeps in `FP64` on RTX GPUs |
-| **Developer + Test Suite** | `uv sync --extra desktop --extra dev` | Adds `pytest`, `httpx`, and `ruff` |
-
-*(Standard `pip` alternative: `python -m venv .venv && source .venv/bin/activate && pip install -e ".[desktop,dev]"`)*
-
-### 3. Launch the Interactive Desktop App (or Web UI)
-
+#### On macOS or Linux (`Terminal`)
 ```bash
-# Launch native desktop window (auto-falls back to browser if pywebview is omitted):
+git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
+cd openmrr-studio
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[desktop]"
+
+# Launch the interactive Studio:
+openmrr
+```
+
+> **Desktop Window vs. Web Browser**:
+> - `openmrr` opens a native desktop window (and automatically falls back to your browser if `pywebview` is omitted).
+> - `openmrr browser` opens the Studio directly in Chrome / Edge / Safari at `http://127.0.0.1:8765` (still 100% local and offline).
+
+<details>
+<summary><b>Conda, <code>uv</code>, or NVIDIA CUDA / Apple Silicon GPU Extras (Click to expand)</b></summary>
+
+#### Using Conda / Miniforge
+```bash
+conda create -n openmrr python=3.12 -y
+conda activate openmrr
+git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
+cd openmrr-studio
+pip install -e ".[desktop]"
+openmrr
+```
+
+#### Using `uv` (Fastest Reproducible Setup + Hardware Extras)
+```bash
+# Install uv once (macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh)
+git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
+cd openmrr-studio
+
+# Standard CPU / Laptop (Windows, macOS, Linux):
+uv sync --extra desktop
+
+# NVIDIA RTX GPU Workstation (Windows / Linux FP64 CUDA acceleration):
+uv sync --extra desktop --extra cuda
+
+# Apple Silicon Mac (AMX + Metal MLX acceleration):
+uv sync --extra desktop --extra apple
+
+# Launch:
 uv run openmrr
-
-# Or open directly in Chrome / Safari / Edge:
-uv run openmrr browser
-
-# Or double-click the platform launcher scripts:
-#   macOS   : launchers/OpenMRR_macOS.command
-#   Windows : launchers\OpenMRR_Windows.bat
 ```
+</details>
 
-### 4. Verify Hardware & Run the Step-by-Step Cookbook Recipes
+---
+
+### Optional: Verify Your Setup & Run the Cookbook Examples
+
+With your `.venv` (or Conda environment) activated:
 
 ```bash
-# 0. Check GPU/AMX/CPU hardware backend, 100k-pt speed & 18 optical materials:
-uv run python examples/00_getting_started/00_check_environment.py
+# 0. Check CPU/GPU backend, 100k-pt TMM speed & 24 optical materials:
+python examples/00_getting_started/00_check_environment.py
 
 # 1. Sweep waveguide width to find exact TE0 single-mode cutoff on 400 nm Si3N4:
-uv run python examples/00_getting_started/01_waveguide_dispersion_sweep.py
+python examples/00_getting_started/01_waveguide_dispersion_sweep.py
 
 # 2. Design 220 nm SOI racetrack add-drop & run coupler gap tolerance sweep:
-uv run python examples/01_devices_and_sweeps/01_soi_point_and_racetrack.py
+python examples/01_devices_and_sweeps/01_soi_point_and_racetrack.py
 
 # 3. Synthesize 4H-SiC concentric pulley critical coupling & X-cut TFLN EO tuning:
-uv run python examples/01_devices_and_sweeps/02_sin_and_sic_pulley_cc.py
+python examples/01_devices_and_sweeps/02_sin_and_sic_pulley_cc.py
 
 # 3b. Multi-waveband showcase: Visible 532/780 nm, O-band 1310 nm, SWIR 2 um & Mid-IR 4.2/7.5 um:
-uv run python examples/01_devices_and_sweeps/03_multiband_vis_1310_midir.py
+python examples/01_devices_and_sweeps/03_multiband_vis_1310_midir.py
 
 # 4. Create single-device & 5-ring MPW sweep array .GDS + KLayout .lyp:
-uv run python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
+python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
 
 # 5. Upload/read any external .GDS -> extract polygons -> simulate spectrum:
-uv run python examples/02_gds_roundtrip/02_upload_and_simulate_gds.py
+python examples/02_gds_roundtrip/02_upload_and_simulate_gds.py
 
 # 6. Fit CW/CCW split-doublet & multi-FSR experimental spectra via CMT:
-uv run python examples/03_lab_spectrum_fitting/01_fit_doublet_and_multifsr.py
+python examples/03_lab_spectrum_fitting/01_fit_doublet_and_multifsr.py
 
-# Run automated test suite:
-uv run pytest
+# Run all 9 automated verification suites:
+python tests/test_openmrr_all.py
 ```
 
 ---
@@ -182,6 +257,8 @@ uv run openmrr agent design --top pulley_ap --mat 4H-SiC --h 0.60 --w-ring 1.10 
 openmrr-studio/
 ├── pyproject.toml / .python-version       uv / Hatchling package config (MIT)
 ├── launchers/                             Double-clickable macOS (.command) & Windows (.bat) launchers
+├── packaging/                             macOS (.dmg/.icns) & Windows Inno Setup (.iss/.ico) installers
+├── .devcontainer/                         1-click GitHub Codespaces cloud browser configuration
 ├── src/openmrr/
 │   ├── materials.py                       24 multi-band materials (Vis -> O/C -> Mid-IR, dn/dT, r_ij, k)
 │   ├── conformal_mesher.py                Pure-BSD constrained Delaunay waveguide mesher (zero GPL)
@@ -206,16 +283,21 @@ openmrr-studio/
 
 ---
 
-## Building Standalone Executables (`macOS .app` & `Windows .exe`)
+## Building Consumer Installers (`macOS .dmg` & `Windows Setup .exe`)
 
-Because OpenMRR Studio contains **zero GPL runtime dependencies**, you can distribute standalone binaries freely:
+Because OpenMRR Studio contains **zero GPL runtime dependencies**, you can build standalone desktop installers directly from source:
 
 ```bash
-pip install pyinstaller
-python -m openmrr.build_standalone --target macos          # macOS Apple Silicon .app
-python -m openmrr.build_standalone --target windows-cpu    # Lightweight Windows 10/11 CPU .exe
-python -m openmrr.build_standalone --target windows-cuda   # NVIDIA RTX CUDA-enabled Windows .exe
+pip install -e ".[desktop]" pillow pyinstaller
+
+# macOS -> builds dist/OpenMRR Studio.app + drag-to-Applications .dmg:
+python -m openmrr.build_standalone --target macos
+
+# Windows 10/11 -> builds Inno Setup .exe installer + portable .zip:
+python -m openmrr.build_standalone --target windows-cpu
+python -m openmrr.build_standalone --target windows-cuda
 ```
+*(A ready-to-run GitHub Actions cloud builder for both Windows `.exe` and macOS `.dmg` is also provided in [`packaging/build_installers_workflow.yml`](./packaging/build_installers_workflow.yml).)*
 
 ---
 
@@ -235,6 +317,8 @@ This project is an independent open-source effort and is not affiliated with or 
 
 ---
 
-## Contributing, Citing & License
+## Author, Citing & License
 
-Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) and [ROADMAP.md](./ROADMAP.md). If OpenMRR Studio helps your research or teaching, please cite it via [CITATION.cff](./CITATION.cff). Released under the [MIT License](./LICENSE).
+- **Author**: **Zhihao Ren** ([ORCID: 0000-0002-2520-0784](https://orcid.org/0000-0002-2520-0784))
+- **Citation**: If OpenMRR Studio helps your research, tape-out, or teaching, please cite it via GitHub's *"Cite this repository"* button or [CITATION.cff](./CITATION.cff).
+- **Contributing & License**: Contributions are welcome (see [CONTRIBUTING.md](./CONTRIBUTING.md) and [ROADMAP.md](./ROADMAP.md)). Released for free under the permissive [MIT License](./LICENSE).

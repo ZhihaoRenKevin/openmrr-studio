@@ -1,30 +1,35 @@
-"""Conversational Photonics Design Copilot (`openmrr.copilot`).
+"""Guided Step-by-Step Conversational Photonics Copilot (`openmrr.copilot`).
 
-Guides users step-by-step from application requirements -> wafer stack -> 2D Maxwell
-eigenmode & single-mode cutoff check -> resonator & coupler synthesis -> parameter sweeps
--> foundry GDSII mask creation or uploaded-GDS optical verification.
-
-Works 100% offline with deterministic physics-grounded natural-language parsing
-(English & Simplified Chinese), with optional local Ollama (`127.0.0.1:11434`) commentary.
+Bilingual (`English` & `简体中文`) conversational assistant that guides users step-by-step
+(one clear question at a time, or instant fast-forward when multiple specs are given):
+  Step 1: Goal (New MRR Design / Extract Loss & Q from Lab .CSV / Analyze Uploaded .GDS)
+  Step 2: Wavelength Band (`400 nm` Visible -> `1310 nm` -> `1550 nm` -> `14 um` Mid-IR)
+  Step 3: Transparent Waveguide Core Material
+  Step 4: Wafer Stack & Polarization -> 2D Full-Vector Eigenmode & Single-Mode Cutoff
+  Step 5: Waveguide Propagation Loss (`dB/cm` or `Q_int`) -> Ring Topology & Target `FSR`
+  Step 6: Critical Coupling Synthesis, Fabrication/Loss Sweeps & Foundry `.GDS` Export
 """
 from __future__ import annotations
 
 from dataclasses import asdict, fields, replace
 import json
 import math
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import urllib.request
 
 import numpy as np
 
-from .eigenmode_solver import WaveguideCrossSectionSpec, solve_modes_fem
 from .gds_bridge import (
     analyze_uploaded_gds,
     export_sweep_array_gds,
     write_klayout_layer_props,
 )
-from .materials import C0_M_PER_S, MATERIAL_CATALOG, T_REF_K, get_material_fn
+from .materials import C0_M_PER_S, MATERIAL_CATALOG
+from .mrr_cmt_fit_predict import loss_db_per_cm_to_q_int, q_int_to_loss_db_per_cm
 from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
@@ -33,7 +38,7 @@ from .mrr_topologies import (
 )
 from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 
-# Foundry-standard starting presets per core material so beginners get physical defaults immediately
+# Foundry-standard starting presets per core material
 PLATFORM_PRESETS: dict[str, dict] = {
     "Si": {
         "film_height_um": 0.22,
@@ -48,6 +53,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.30, 0.85),
+        "loss_choices": [0.8, 1.5, 2.2, 3.5],
     },
     "a-Si": {
         "film_height_um": 0.25,
@@ -62,6 +68,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.32, 0.90),
+        "loss_choices": [1.5, 3.0, 5.0, 8.0],
     },
     "Si3N4": {
         "film_height_um": 0.40,
@@ -76,6 +83,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.60, 2.10),
+        "loss_choices": [0.10, 0.35, 0.80, 1.50],
     },
     "SiRich_SiNx": {
         "film_height_um": 0.35,
@@ -90,6 +98,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.45, 1.50),
+        "loss_choices": [0.5, 1.2, 2.5, 4.0],
     },
     "4H-SiC": {
         "film_height_um": 0.60,
@@ -104,6 +113,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.45, 1.70),
+        "loss_choices": [0.25, 0.60, 1.20, 2.50],
     },
     "3C-SiC": {
         "film_height_um": 0.55,
@@ -118,6 +128,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.45, 1.65),
+        "loss_choices": [0.8, 1.5, 3.0, 5.0],
     },
     "AlN": {
         "film_height_um": 0.80,
@@ -132,6 +143,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.60, 2.00),
+        "loss_choices": [0.4, 0.8, 1.5, 3.0],
     },
     "ScAlN_20": {
         "film_height_um": 0.60,
@@ -146,6 +158,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.55, 1.90),
+        "loss_choices": [0.8, 1.8, 3.0, 5.0],
     },
     "LN_Xcut": {
         "topology": "racetrack_ap",
@@ -162,6 +175,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.75, 2.30),
+        "loss_choices": [0.10, 0.25, 0.60, 1.20],
     },
     "LN_Zcut": {
         "film_height_um": 0.60,
@@ -176,6 +190,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "top_clad_material": "SiO2",
         "wavelength_nm": 1550.0,
         "w_sweep": (0.75, 2.30),
+        "loss_choices": [0.10, 0.25, 0.60, 1.20],
     },
     "Ge": {
         "film_height_um": 1.40,
@@ -191,6 +206,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "wavelength_nm": 4200.0,
         "span_nm": 35.0,
         "w_sweep": (1.10, 3.20),
+        "loss_choices": [1.0, 2.5, 4.0, 6.0],
     },
     "TiO2": {
         "film_height_um": 0.18,
@@ -206,6 +222,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "wavelength_nm": 633.0,
         "span_nm": 4.0,
         "w_sweep": (0.20, 0.65),
+        "loss_choices": [0.8, 1.8, 3.5, 6.0],
     },
     "Ta2O5": {
         "film_height_um": 0.22,
@@ -221,6 +238,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "wavelength_nm": 780.0,
         "span_nm": 5.0,
         "w_sweep": (0.30, 0.95),
+        "loss_choices": [0.25, 0.60, 1.20, 2.50],
     },
     "GaN": {
         "film_height_um": 0.30,
@@ -236,6 +254,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "wavelength_nm": 780.0,
         "span_nm": 5.0,
         "w_sweep": (0.28, 0.90),
+        "loss_choices": [1.0, 2.0, 4.0, 7.0],
     },
     "Diamond": {
         "film_height_um": 0.25,
@@ -251,6 +270,7 @@ PLATFORM_PRESETS: dict[str, dict] = {
         "wavelength_nm": 737.0,
         "span_nm": 4.5,
         "w_sweep": (0.22, 0.78),
+        "loss_choices": [0.5, 1.2, 2.5, 5.0],
     },
 }
 
@@ -264,7 +284,6 @@ def scale_preset_for_wavelength(cfg_dict: dict, new_wl_nm: float, explicit_keys:
     ratio = float(new_wl_nm) / max(ref_wl, 200.0)
 
     if abs(ratio - 1.0) > 0.06:
-        # Keep standard 220 nm SOI thickness across O-band (1310) & C-band (1550) unless Mid-IR
         if "film_height_um" not in explicit_keys:
             if mat == "Si" and 1200.0 <= new_wl_nm <= 1680.0:
                 cfg_dict["film_height_um"] = 0.22
@@ -283,14 +302,12 @@ def scale_preset_for_wavelength(cfg_dict: dict, new_wl_nm: float, explicit_keys:
         if "ring_radius_um" not in explicit_keys:
             cfg_dict["ring_radius_um"] = round(float(np.clip(base["ring_radius_um"] * (ratio ** 0.65), 10.0, 200.0)), 1)
 
-    # Auto-switch cladding away from SiO2 in Mid-IR (>3600 nm) where SiO2 has multiphonon absorption
     if new_wl_nm > 3600.0:
         if "clad_material" not in explicit_keys and cfg_dict.get("clad_material") == "SiO2":
             cfg_dict["clad_material"] = "Si" if mat == "Ge" and new_wl_nm > 5500.0 else "CaF2"
         if "top_clad_material" not in explicit_keys and cfg_dict.get("top_clad_material") == "SiO2":
             cfg_dict["top_clad_material"] = "Air"
 
-    # Scale spectrum window span_nm as ~lambda^2 so 2-3 FSRs stay cleanly visible from 532 nm to 8000 nm
     if "span_nm" not in explicit_keys:
         est_span = 12.0 * ((new_wl_nm / 1550.0) ** 1.85)
         cfg_dict["span_nm"] = round(float(np.clip(est_span, 1.8, 90.0)), 2)
@@ -302,18 +319,23 @@ def scale_preset_for_wavelength(cfg_dict: dict, new_wl_nm: float, explicit_keys:
     )
 
 
-def create_initial_session() -> dict:
-    """Create a fresh Conversational Photonics Copilot session dictionary."""
+def create_initial_session(lang: str = "en") -> dict:
+    """Create a fresh Guided Conversational Photonics Copilot session (`en` or `zh`)."""
+    zh = str(lang).lower().startswith("zh")
     cfg = asdict(MRRDesignConfig())
     welcome = (
-        "Welcome to **OpenMRR Copilot** — your license-free Maxwell eigenmode & CMT microring designer.\n\n"
-        "Tell me your target platform or application (or **upload a `.gds` file** to extract and simulate it):\n"
-        "- **Step 1**: Core material & wafer stack (`H_film`, `H_slab`, cladding, sidewall)\n"
-        "- **Step 2**: Polarization (`TE0`/`TM0`) & single-mode waveguide width check\n"
-        "- **Step 3**: Topology (`Circular`, `Racetrack`, `Pulley`, `Vernier`) & target `FSR` / `Q` / sweeps -> `.gds` mask"
+        "👋 **欢迎使用 OpenMRR Studio 微环光子设计助手！**\n\n"
+        "请选择下方工作流，我将以**一问一答**方式逐步引导您完成微环设计（您也可以直接输入完整参数）："
+        if zh
+        else "👋 **Welcome to OpenMRR Studio!**\n\n"
+        "How would you like to get started? Pick a workflow below and I will guide you **step by step** "
+        "(one question at a time), or type your full spec directly:"
     )
     return {
         "stage": "welcome",
+        "lang": "zh" if zh else "en",
+        "wizard_step": 1,
+        "ui_view": "overview",
         "config": cfg,
         "confirmed": [],
         "target_fsr_ghz": None,
@@ -324,17 +346,117 @@ def create_initial_session() -> dict:
     }
 
 
-def get_welcome_chips() -> list[dict[str, str]]:
-    """Starter quick-reply chips spanning Visible, O-Band (1310 nm), C-Band (1550 nm) & Mid-IR."""
+def get_welcome_chips(lang: str = "en") -> list[dict[str, str]]:
+    """Clean Step-1 workflow choices + 1-click presets in English or Chinese."""
+    if str(lang).lower().startswith("zh"):
+        return [
+            {"label": "✨ 开始逐步引导设计新微环", "prompt": "开始逐步设计微环"},
+            {"label": "📈 从实测光谱提取损耗 (dB/cm) 与 Q 值", "prompt": "从实测光谱提取波导损耗"},
+            {"label": "📐 上传已有 .GDS 版图提取并仿真", "prompt": "上传 GDS 版图", "ui_action": "open_gds_picker"},
+            {"label": "⚡ 快速体验：400nm 氮化硅 @ 1550nm", "prompt": "400 nm Si3N4 条形波导, SiO2包层, TE0 @ 1550 nm"},
+            {"label": "⚡ 快速体验：220nm SOI @ 1310nm", "prompt": "220 nm SOI 条形波导, SiO2包层, TE0 @ 1310 nm"},
+            {"label": "⚡ 快速体验：中红外 4.2µm 锗波导", "prompt": "1400 nm Ge 300 nm slab on CaF2, 空气包层, TE0 @ 4200 nm"},
+        ]
     return [
-        {"label": "Visible 532 nm · Si3N4", "prompt": "180 nm Si3N4 strip, SiO2 clad, TE0 at 532 nm"},
-        {"label": "Quantum 780 nm · TiO2 / AlN", "prompt": "220 nm TiO2 strip, SiO2 clad, TE0 at 780 nm"},
-        {"label": "O-Band 1310 nm · 220nm SOI", "prompt": "220 nm SOI strip, SiO2 clad, TE0 at 1310 nm"},
-        {"label": "C-Band 1550 nm · 400nm Si3N4", "prompt": "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm"},
-        {"label": "1550 nm · 600nm 4H-SiC Pulley", "prompt": "600 nm 4H-SiC strip, SiO2 clad, TE0 at 1550 nm, pulley all-pass"},
-        {"label": "1550 nm · X-cut TFLN Racetrack", "prompt": "600 nm X-cut TFLN with 300 nm slab, SiO2 clad, TE0 at 1550 nm, racetrack"},
-        {"label": "Mid-IR 4.2 um · Ge on CaF2", "prompt": "1400 nm Ge with 300 nm slab on CaF2, air clad, TE0 at 4200 nm"},
-        {"label": "LWIR 7.5 um · Ge on Si", "prompt": "2200 nm Ge strip on Si substrate, air clad, TE0 at 7500 nm"},
+        {"label": "✨ Start Step-by-Step Ring Design", "prompt": "Start step-by-step microring design"},
+        {"label": "📈 Extract Loss (dB/cm) & Q from Spectrum", "prompt": "Extract waveguide loss from measured spectrum"},
+        {"label": "📐 Upload & Analyze .GDS Layout", "prompt": "Upload GDS layout", "ui_action": "open_gds_picker"},
+        {"label": "⚡ Quick Try: 400nm Si3N4 @ 1550nm", "prompt": "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm"},
+        {"label": "⚡ Quick Try: 220nm SOI @ 1310nm", "prompt": "220 nm SOI strip, SiO2 clad, TE0 at 1310 nm"},
+        {"label": "⚡ Quick Try: Mid-IR Ge @ 4.2 µm", "prompt": "1400 nm Ge with 300 nm slab on CaF2, air clad, TE0 at 4200 nm"},
+    ]
+
+
+def _get_waveband_chips(zh: bool = False) -> list[dict[str, str]]:
+    if zh:
+        return [
+            {"label": "🌈 可见光 (532 nm)", "prompt": "波长 532 nm"},
+            {"label": "⚛️ 量子/近红外 (780 nm)", "prompt": "波长 780 nm"},
+            {"label": "📡 O波段数通 (1310 nm)", "prompt": "波长 1310 nm"},
+            {"label": "🌐 C波段光通信 (1550 nm)", "prompt": "波长 1550 nm"},
+            {"label": "🔦 短波红外 SWIR (2000 nm)", "prompt": "波长 2000 nm"},
+            {"label": "🔥 中红外传感 (4200 nm)", "prompt": "波长 4200 nm"},
+            {"label": "🌡️ 长波中红外 (7500 nm)", "prompt": "波长 7500 nm"},
+        ]
+    return [
+        {"label": "🌈 Visible (532 nm)", "prompt": "Wavelength = 532 nm"},
+        {"label": "⚛️ Quantum / Red-NIR (780 nm)", "prompt": "Wavelength = 780 nm"},
+        {"label": "📡 Datacom O-Band (1310 nm)", "prompt": "Wavelength = 1310 nm"},
+        {"label": "🌐 Telecom C-Band (1550 nm)", "prompt": "Wavelength = 1550 nm"},
+        {"label": "🔦 SWIR (2000 nm)", "prompt": "Wavelength = 2000 nm"},
+        {"label": "🔥 Mid-IR Sensing (4200 nm)", "prompt": "Wavelength = 4200 nm"},
+        {"label": "🌡️ Long-Wave Mid-IR (7500 nm)", "prompt": "Wavelength = 7500 nm"},
+    ]
+
+
+def _get_material_chips_for_wavelength(wl_nm: float, zh: bool = False) -> list[dict[str, str]]:
+    """Return only waveguide core platforms physically transparent at `wl_nm`."""
+    if wl_nm < 1050.0:
+        if zh:
+            return [
+                {"label": "Si3N4 氮化硅 (超低损耗)", "prompt": "材料 Si3N4"},
+                {"label": "TiO2 二氧化钛 (可见光高折射率)", "prompt": "材料 TiO2"},
+                {"label": "Ta2O5 五氧化二钽 (低损耗)", "prompt": "材料 Ta2O5"},
+                {"label": "AlN 氮化铝 (压电/电光)", "prompt": "材料 AlN"},
+                {"label": "4H-SiC 碳化硅 (量子/非线性)", "prompt": "材料 4H-SiC"},
+                {"label": "Diamond 金刚石 (色心量子)", "prompt": "材料 Diamond"},
+            ]
+        return [
+            {"label": "Si3N4 (Ultra-low loss Nitride)", "prompt": "Core material: Si3N4"},
+            {"label": "TiO2 (High-index Visible)", "prompt": "Core material: TiO2"},
+            {"label": "Ta2O5 (Low-loss Tantala)", "prompt": "Core material: Ta2O5"},
+            {"label": "AlN (Piezo / Pockels)", "prompt": "Core material: AlN"},
+            {"label": "4H-SiC (Quantum / Nonlinear)", "prompt": "Core material: 4H-SiC"},
+            {"label": "Diamond (Color Centers)", "prompt": "Core material: Diamond"},
+        ]
+    if wl_nm > 3600.0:
+        if wl_nm > 5500.0:
+            return (
+                [
+                    {"label": "Ge-on-Si 硅基锗波导 (5–12 µm)", "prompt": "材料 Ge on Si"},
+                    {"label": "Ge-on-CaF2 氟化钙基锗波导", "prompt": "材料 Ge on CaF2"},
+                    {"label": "Diamond 金刚石宽谱波导", "prompt": "材料 Diamond"},
+                ]
+                if zh
+                else [
+                    {"label": "Ge on Si (5–12 µm LWIR)", "prompt": "Core material: Ge on Si"},
+                    {"label": "Ge on CaF2 (3–8 µm Mid-IR)", "prompt": "Core material: Ge on CaF2"},
+                    {"label": "Diamond (Broadband Mid-IR)", "prompt": "Core material: Diamond"},
+                ]
+            )
+        return (
+            [
+                {"label": "Ge-on-CaF2 中红外锗波导", "prompt": "材料 Ge on CaF2"},
+                {"label": "4H-SiC 碳化硅 (透光至 ~4.5 µm)", "prompt": "材料 4H-SiC"},
+                {"label": "Si-on-CaF2 硅波导 (空气包层)", "prompt": "材料 Si on CaF2"},
+                {"label": "AlN 氮化铝中红外波导", "prompt": "材料 AlN"},
+                {"label": "Diamond 金刚石波导", "prompt": "材料 Diamond"},
+            ]
+            if zh
+            else [
+                {"label": "Ge on CaF2 (Mid-IR High-Index)", "prompt": "Core material: Ge on CaF2"},
+                {"label": "4H-SiC (Transparent to ~4.5 µm)", "prompt": "Core material: 4H-SiC"},
+                {"label": "Si on CaF2 / Air-clad", "prompt": "Core material: Si on CaF2"},
+                {"label": "AlN (Mid-IR Piezo/EO)", "prompt": "Core material: AlN"},
+                {"label": "Diamond (Broadband Mid-IR)", "prompt": "Core material: Diamond"},
+            ]
+        )
+    if zh:
+        return [
+            {"label": "Si 绝缘体上硅 (220 nm SOI)", "prompt": "材料 SOI"},
+            {"label": "Si3N4 氮化硅 (超低损耗)", "prompt": "材料 Si3N4"},
+            {"label": "4H-SiC 碳化硅 (非线性/量子)", "prompt": "材料 4H-SiC"},
+            {"label": "X-cut TFLN 薄膜铌酸锂 (高速电光)", "prompt": "材料 X-cut TFLN"},
+            {"label": "AlN 氮化铝", "prompt": "材料 AlN"},
+            {"label": "ScAlN 20% 氮化铝钪 (压电/电光)", "prompt": "材料 ScAlN 20%"},
+        ]
+    return [
+        {"label": "Si (220 nm SOI Silicon)", "prompt": "Core material: SOI"},
+        {"label": "Si3N4 (Low-loss Silicon Nitride)", "prompt": "Core material: Si3N4"},
+        {"label": "4H-SiC (Nonlinear / Quantum)", "prompt": "Core material: 4H-SiC"},
+        {"label": "X-cut TFLN (Electro-Optic LiNbO3)", "prompt": "Core material: X-cut TFLN"},
+        {"label": "AlN (Aluminum Nitride)", "prompt": "Core material: AlN"},
+        {"label": "ScAlN 20% (Piezo / Pockels)", "prompt": "Core material: ScAlN 20%"},
     ]
 
 
@@ -350,7 +472,7 @@ def _to_um(value: float, unit: str) -> float:
 
 
 def parse_photonics_intent(message: str) -> dict:
-    """Extract material, wafer stack, mode, topology, targets, and sweep/GDS actions from text."""
+    """Extract guided step intents, material, wafer stack, propagation loss, Q_int, topology & actions."""
     text = message.strip()
     low = text.lower()
     out: dict = {
@@ -361,11 +483,23 @@ def parse_photonics_intent(message: str) -> dict:
         "sweep": None,
     }
 
-    if re.search(r"\b(reset|start over|new design|clear session)\b|重置|重新开始|新建设计", low):
+    if re.search(r"\b(reset|start over|clear session)\b|重置|重新开始", low):
         out["action"] = "reset"
         return out
 
-    # 1. Core Material Recognition (ordered from specific to general)
+    if re.search(r"step[-_\s]*by[-_\s]*step|start\s+design|guided\s+design|逐步设计|逐步引导|开始设计|引导设计", low):
+        out["action"] = "start_guided"
+        return out
+
+    if re.search(r"extract.*loss|fit.*spectrum|measured.*spectrum|lab.*spectrum|提取.*损耗|拟合.*光谱", low):
+        out["action"] = "open_spectrum_fitter"
+        return out
+
+    if re.search(r"^upload\s+gds|i\s+want\s+to\s+upload.*gds|上传.*gds", low):
+        out["action"] = "open_gds_uploader"
+        return out
+
+    # 1. Core Material Recognition
     mat = None
     if re.search(r"scaln|氮化铝钪", low):
         sc_match = re.search(r"(10|20|30)\s*%", low) or re.search(r"scaln[_\s]*(10|20|30)", low)
@@ -408,10 +542,10 @@ def parse_photonics_intent(message: str) -> dict:
     if mat:
         out["fields"]["core_material"] = mat
 
-    # 2. Cladding & Substrate (SiO2, Air, Al2O3, CaF2, MgF2, Si for Ge-on-Si)
+    # 2. Cladding & Substrate
     if re.search(r"air[-_\s]*(clad|top)|unclad|空气包层|无上包层", low):
         out["fields"]["top_clad_material"] = "Air"
-    elif re.search(r"(sio2|oxide|silica)[-_\s]*(clad|top)|二氧化硅包层|氧化物包层", low):
+    elif re.search(r"(sio2|oxide|silica)[-_\s]*(clad|top)|sio2\s*包层|二氧化硅包层|氧化物包层", low):
         out["fields"]["top_clad_material"] = "SiO2"
         out["fields"]["clad_material"] = "SiO2"
     if re.search(r"on\s+caf2|caf2|氟化钙", low):
@@ -429,7 +563,7 @@ def parse_photonics_intent(message: str) -> dict:
     elif re.search(r"\bte0?\b|横电", low):
         out["fields"]["polarization"] = "TE0"
 
-    # 4. Wavelength & Named Wavebands (Visible 400-850 nm, O-band 1310 nm, C-band 1550 nm, SWIR 2000 nm, Mid-IR 3-12 um)
+    # 4. Wavelength & Named Wavebands
     wl_m = (
         re.search(r"(?:wavelength|wl|lambda|@|\bat\b|波长)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
         or re.search(r"\b(405|450|488|532|633|637|736|737|750|780|850|980|1064|1270|1310|1330|1530|1550|1625|2000|2100|3300|3800|4200|4500|5200|7500|8000)(?:\.\d+)?\s*(nm)?\b", low)
@@ -454,7 +588,6 @@ def parse_photonics_intent(message: str) -> dict:
         out["fields"]["wavelength_nm"] = 532.0
 
     # 5. Film height H_film & Slab height H_slab & Sidewall angle
-    # Pattern like "220 nm SOI", "400nm Si3N4", "1400 nm Ge", "H_film = 500 nm", "film 0.4 um"
     h_explicit = re.search(
         r"(?:h_?film|film(?:\s*height|\s*thickness)?|thickness|core\s*height|膜厚|厚度)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)",
         low,
@@ -475,7 +608,7 @@ def parse_photonics_intent(message: str) -> dict:
     else:
         slab_m = (
             re.search(r"(?:h_?slab|slab(?:\s*height|\s*thickness)?|平板层|剩余厚度)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
-            or re.search(r"(\d+(?:\.\d+)?)\s*(nm|um|µm)\s+slab\b", low)
+            or re.search(r"(\d+(?:\.\d+)?)\s*(nm|um|µm)\s*(?:slab|平板)", low)
         )
         if slab_m:
             out["fields"]["slab_height_um"] = _to_um(float(slab_m.group(1)), slab_m.group(2))
@@ -489,15 +622,15 @@ def parse_photonics_intent(message: str) -> dict:
         if 55.0 <= ang <= 90.0:
             out["fields"]["sidewall_deg"] = ang
 
-    # 6. Sweep Commands (detect BEFORE generic single-value parameters so ranges aren't misread)
+    # 6. Sweep Commands
     sweep_match = re.search(
-        r"(?:sweep|scan|vary|扫描|扫参|扫)\s*(width|w\b|gap|pulley|angle|theta|length|straight|l_s|radius|r\b|temp|temperature|voltage|bias|波导宽度|宽度|间距|包角|角度|直波导|耦合长度|半径|温度|电压)",
+        r"(?:sweep|scan|vary|扫描|扫参|扫)\s*(?:propagation\s*|传播)?(width|w\b|gap|loss|alpha|pulley|angle|theta|length|straight|l_s|radius|r\b|temp|temperature|voltage|bias|波导宽度|宽度|间距|损耗|包角|角度|直波导|耦合长度|半径|温度|电压)",
         low,
     )
     if sweep_match or re.search(r"single[-_\s]*mode\s*(?:check|sweep|cutoff|width)|单模(?:分析|截止|检查)", low):
         nums = [
             (float(m.group(1)), m.group(2))
-            for m in re.finditer(r"(-?\d+(?:\.\d+)?)\s*(nm|um|µm|deg|°|k|v)?", low[sweep_match.end():] if sweep_match else low)
+            for m in re.finditer(r"(-?\d+(?:\.\d+)?)\s*(nm|um|µm|deg|°|k|v|db)?", low[sweep_match.end():] if sweep_match else low)
         ]
         kind_tok = sweep_match.group(1) if sweep_match else "width"
         if kind_tok in ("width", "w", "波导宽度", "宽度"):
@@ -510,6 +643,9 @@ def parse_photonics_intent(message: str) -> dict:
         param_map = {
             "gap": "gap_thru_um",
             "间距": "gap_thru_um",
+            "loss": "alpha_loss_db_per_cm",
+            "alpha": "alpha_loss_db_per_cm",
+            "损耗": "alpha_loss_db_per_cm",
             "pulley": "pulley_angle_thru_deg",
             "angle": "pulley_angle_thru_deg",
             "theta": "pulley_angle_thru_deg",
@@ -537,7 +673,7 @@ def parse_photonics_intent(message: str) -> dict:
             if p_name.endswith("_um") and u == "nm":
                 vals_parsed.append(v * 1e-3)
             elif p_name == "gap_thru_um" and u == "" and v > 10.0:
-                vals_parsed.append(v * 1e-3)  # e.g., "sweep gap 150 to 350 nm" where first num lacked unit
+                vals_parsed.append(v * 1e-3)
             else:
                 vals_parsed.append(v)
         out["sweep"] = {
@@ -546,7 +682,7 @@ def parse_photonics_intent(message: str) -> dict:
         }
         return out
 
-    # 7. Waveguide Widths, Radius, Gap, Pulley Angle, Straight Length, Loss, Active Tuning
+    # 7. Waveguide Widths, Radius, Gap, Pulley Angle, Straight Length, Propagation Loss (dB/cm) or Q_int, Tuning
     wr_m = re.search(r"(?:w_?ring|ring\s*width|环宽)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
     wb_m = re.search(r"(?:w_?bus|bus\s*width|总线宽)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
     wg_m = re.search(r"(?:\bwidth\b|波导宽)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
@@ -579,9 +715,29 @@ def parse_photonics_intent(message: str) -> dict:
     if ls_m:
         out["fields"]["straight_length_um"] = _to_um(float(ls_m.group(1)), ls_m.group(2))
 
-    loss_m = re.search(r"(?:loss|\balpha\b|损耗)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*db\s*/\s*cm", low)
+    # Propagation loss in dB/cm
+    loss_m = (
+        re.search(r"(?:propagation\s*loss|loss|\balpha\b|传播损耗|损耗)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:db\s*/\s*cm|db/cm)?", low)
+        or re.search(r"\b(\d+(?:\.\d+)?)\s*db\s*/\s*cm\b", low)
+    )
     if loss_m:
-        out["fields"]["alpha_loss_db_per_cm"] = float(loss_m.group(1))
+        l_val = float(loss_m.group(1))
+        if 0.001 <= l_val <= 200.0:
+            out["fields"]["alpha_loss_db_per_cm"] = round(l_val, 4)
+    elif re.search(r"default.*loss|keep.*loss|默认损耗", low):
+        out["targets"]["confirm_default_loss"] = True
+
+    # Intrinsic Q input
+    qint_m = re.search(r"(?:q_?int|intrinsic\s*q|本征\s*q)\s*[=:≈~]?\s*(\d+(?:\.\d+)?(?:e\d+)?)\s*([km])?\b", low)
+    if qint_m:
+        qv = float(qint_m.group(1))
+        suf = (qint_m.group(2) or "").lower()
+        if suf == "k":
+            qv *= 1e3
+        elif suf == "m":
+            qv *= 1e6
+        if qv >= 500.0:
+            out["targets"]["q_int_target"] = qv
 
     dt_m = re.search(r"(?:delta_?t|\bdt\b|temp(?:erature)?|升温|温升)\s*[=:+]?\s*(-?\d+(?:\.\d+)?)\s*(?:k|°c|c\b)", low)
     if dt_m:
@@ -625,7 +781,7 @@ def parse_photonics_intent(message: str) -> dict:
         out["action"] = "export_single_gds"
     elif re.search(r"\b(simulate|calculate|compute|run\s+mrr|evaluate)\b|开始仿真|运行仿真|计算光谱|确认并仿真", low):
         out["action"] = "simulate_mrr"
-    elif re.search(r"confirm\s+stack|check\s+mode|确认叠层", low):
+    elif re.search(r"confirm\s+stack|check\s+mode|solve\s+2d\s+modes|确认叠层|求解模式", low):
         out["action"] = "sweep_width"
 
     return out
@@ -636,15 +792,59 @@ def _dict_to_cfg(cfg_dict: dict) -> MRRDesignConfig:
     return MRRDesignConfig(**{k: v for k, v in cfg_dict.items() if k in valid})
 
 
-def _maybe_ollama_commentary(compact_kpi: str) -> str | None:
-    """Zero-cloud-token local LLM tip via Ollama (`127.0.0.1:11434`) or LM Studio MLX (`127.0.0.1:1234`).
+def _find_cli_binary(name: str) -> str | None:
+    """Locate an installed CLI binary (`claude`, `codex`) even inside macOS .app / Windows .exe PATH."""
+    found = shutil.which(name)
+    if found:
+        return found
+    home = Path.home()
+    candidates = [
+        Path("/opt/homebrew/bin") / name,
+        Path("/usr/local/bin") / name,
+        home / ".local" / "bin" / name,
+        home / ".npm-global" / "bin" / name,
+    ]
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            candidates.append(Path(appdata) / "npm" / f"{name}.cmd")
+            candidates.append(Path(appdata) / "npm" / f"{name}.exe")
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
 
-    Sends ONLY a <80-token scalar KPI summary and disables reasoning chains (`think: False`)
-    so local inference finishes in <1 s on Apple Silicon / CUDA / NPU with minimal RAM/compute.
-    """
-    prompt = f"Give ONE 1-sentence practical photonics fab/design tip for this MRR: {compact_kpi}"
 
-    # 1. Try local Ollama (auto-detect first installed chat model, prefer qwen3:14b / llama3)
+def probe_ai_backends() -> dict:
+    """Probe available Offline & Online (`Claude` / `Codex` / `Ollama`) AI backends locally."""
+    ollama_ok = False
+    for url in ("http://127.0.0.1:11434/api/tags", "http://127.0.0.1:1234/v1/models"):
+        try:
+            with urllib.request.urlopen(url, timeout=0.45) as resp:
+                if resp.status == 200:
+                    ollama_ok = True
+                    break
+        except Exception:
+            pass
+    claude_cli = _find_cli_binary("claude")
+    codex_cli = _find_cli_binary("codex")
+    return {
+        "offline": True,
+        "ollama_available": ollama_ok,
+        "claude_cli_available": bool(claude_cli),
+        "claude_env_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "codex_cli_available": bool(codex_cli),
+        "codex_env_key": bool(os.environ.get("OPENAI_API_KEY")),
+    }
+
+
+def _maybe_ollama_commentary(compact_kpi: str, zh: bool = False) -> str | None:
+    """Zero-cloud-token local LLM tip via Ollama (`127.0.0.1:11434`) or LM Studio MLX (`127.0.0.1:1234`)."""
+    prompt = (
+        f"请用1~2句简短中文回答或给出微环流片/设计建议：{compact_kpi}"
+        if zh
+        else f"Give a concise 1-2 sentence practical photonics design/fabrication insight for: {compact_kpi}"
+    )
     try:
         with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=0.8) as tag_resp:
             models = [m.get("name", "") for m in json.loads(tag_resp.read().decode("utf-8")).get("models", [])]
@@ -655,7 +855,7 @@ def _maybe_ollama_commentary(compact_kpi: str) -> str | None:
             "prompt": prompt,
             "think": False,
             "stream": False,
-            "options": {"num_predict": 60, "temperature": 0.2},
+            "options": {"num_predict": 90, "temperature": 0.2},
         }).encode("utf-8")
         req = urllib.request.Request(
             "http://127.0.0.1:11434/api/generate",
@@ -663,19 +863,18 @@ def _maybe_ollama_commentary(compact_kpi: str) -> str | None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
             tip = (json.loads(resp.read().decode("utf-8")).get("response") or "").strip()
             tip = re.sub(r"<think>.*?</think>", "", tip, flags=re.DOTALL).strip()
             if tip:
-                return f"({chosen}) {tip}"
+                return f"🖥 **Local LLM (`{chosen}`)**: {tip}"
     except Exception:
         pass
 
-    # 2. Fallback: Try local LM Studio (Apple MLX / GGUF OpenAI-compatible localhost:1234)
     try:
         lm_body = json.dumps({
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 60,
+            "max_tokens": 90,
             "temperature": 0.2,
         }).encode("utf-8")
         req2 = urllib.request.Request(
@@ -684,19 +883,153 @@ def _maybe_ollama_commentary(compact_kpi: str) -> str | None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req2, timeout=2.5) as resp2:
+        with urllib.request.urlopen(req2, timeout=3.5) as resp2:
             d2 = json.loads(resp2.read().decode("utf-8"))
             tip2 = d2["choices"][0]["message"]["content"].strip()
             tip2 = re.sub(r"<think>.*?</think>", "", tip2, flags=re.DOTALL).strip()
             if tip2:
-                return f"(Local MLX) {tip2}"
+                return f"🖥 **Local MLX**: {tip2}"
     except Exception:
         pass
     return None
 
 
-def inject_uploaded_gds_into_session(session: dict, gds_info: dict) -> dict:
+def query_ai_copilot(
+    *,
+    ai_mode: str,
+    user_message: str,
+    compact_state: str,
+    zh: bool = False,
+    api_key: str | None = None,
+) -> str | None:
+    """Query local (`ollama`) or online (`claude` / `codex` via CLI or API) using <150 tokens of context."""
+    mode = (ai_mode or "offline").lower().strip()
+    if mode == "offline":
+        return None
+    if mode == "ollama":
+        return _maybe_ollama_commentary(f"User='{user_message[:120]}' | State: {compact_state}", zh=zh)
+
+    sys_rule = (
+        "你是集成光子微环芯片专家。本地2D矢量有限元与耦合模求解器已算出精确数值，请针对用户输入和当前器件状态，用2~3句简练专业中文回答问题或给出关键设计/流片建议（勿重复罗列全部数字）。"
+        if zh
+        else "You are an integrated photonics microring expert. Exact 2D Maxwell FEM & CMT physics already ran locally. Answer the user's message or give 2-3 concise sentences of actionable physics/tape-out guidance grounded in this state (do not repeat the whole table)."
+    )
+    compact_prompt = f"{sys_rule}\nUser: {user_message[:240]}\nSolved State: {compact_state}"
+
+    if mode == "claude":
+        eff_key = (api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+        if eff_key:
+            try:
+                body = json.dumps({
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 200,
+                    "temperature": 0.2,
+                    "system": sys_rule,
+                    "messages": [{"role": "user", "content": f"User: {user_message[:240]}\nSolved State: {compact_state}"}],
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/messages",
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": eff_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=14.0) as resp:
+                    blocks = json.loads(resp.read().decode("utf-8")).get("content", [])
+                    txt = " ".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+                    if txt:
+                        return f"🟣 **Claude**: {txt}"
+            except Exception as exc:
+                return f"🟣 **Claude API Notice**: `{exc}`"
+
+        claude_bin = _find_cli_binary("claude")
+        if claude_bin:
+            try:
+                env = os.environ.copy()
+                env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:{Path.home() / '.local/bin'}:{env.get('PATH', '')}"
+                proc = subprocess.run(
+                    [claude_bin, "-p", compact_prompt],
+                    capture_output=True,
+                    text=True,
+                    timeout=18.0,
+                    env=env,
+                )
+                out = (proc.stdout or "").strip()
+                if proc.returncode == 0 and out:
+                    return f"🟣 **Claude Code**: {out}"
+            except Exception:
+                pass
+        return (
+            "🟣 *提示：如需启用在线 Claude 问答，请点击上方 `🔑 Key` 填入 Anthropic API Key，或在电脑终端登录 `claude` CLI。*"
+            if zh
+            else "🟣 *Tip: To enable Online Claude insights, click `🔑 Key` to enter an Anthropic API key (kept in memory only) or sign in to `claude` CLI locally.*"
+        )
+
+    if mode == "codex":
+        eff_key = (api_key or os.environ.get("OPENAI_API_KEY") or "").strip()
+        if eff_key:
+            try:
+                body = json.dumps({
+                    "model": "gpt-4o-mini",
+                    "max_tokens": 200,
+                    "temperature": 0.2,
+                    "messages": [
+                        {"role": "system", "content": sys_rule},
+                        {"role": "user", "content": f"User: {user_message[:240]}\nSolved State: {compact_state}"},
+                    ],
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    "https://api.openai.com/v1/chat/completions",
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {eff_key}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=14.0) as resp:
+                    choices = json.loads(resp.read().decode("utf-8")).get("choices", [])
+                    if choices:
+                        txt = (choices[0].get("message", {}).get("content") or "").strip()
+                        if txt:
+                            return f"🟢 **Codex / OpenAI**: {txt}"
+            except Exception as exc:
+                return f"🟢 **OpenAI API Notice**: `{exc}`"
+
+        codex_bin = _find_cli_binary("codex")
+        if codex_bin:
+            try:
+                env = os.environ.copy()
+                env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:{Path.home() / '.local/bin'}:{env.get('PATH', '')}"
+                proc = subprocess.run(
+                    [codex_bin, "exec", "--skip-git-repo-check", compact_prompt],
+                    capture_output=True,
+                    text=True,
+                    timeout=22.0,
+                    env=env,
+                )
+                out = (proc.stdout or "").strip()
+                if proc.returncode == 0 and out:
+                    lines = [ln for ln in out.splitlines() if not ln.startswith(("[", "OpenAI Codex", "--------"))]
+                    cleaned = "\n".join(lines[-6:]).strip() or out[-400:].strip()
+                    return f"🟢 **Codex CLI**: {cleaned}"
+            except Exception:
+                pass
+        return (
+            "🟢 *提示：如需启用在线 Codex / OpenAI 问答，请点击上方 `🔑 Key` 填入 OpenAI API Key，或在电脑终端登录 `codex` CLI。*"
+            if zh
+            else "🟢 *Tip: To enable Online Codex / OpenAI insights, click `🔑 Key` to enter an OpenAI API key (kept in memory only) or sign in to `codex` CLI locally.*"
+        )
+
+    return None
+
+
+def inject_uploaded_gds_into_session(session: dict, gds_info: dict, lang: str = "en") -> dict:
     """Update Copilot session with polygon-extracted dimensions from an uploaded `.gds`/`.oas`."""
+    zh = str(lang or session.get("lang", "en")).lower().startswith("zh")
     ext = gds_info["extracted_geometry"]
     cfg = dict(session["config"])
     for key in (
@@ -716,39 +1049,57 @@ def inject_uploaded_gds_into_session(session: dict, gds_info: dict) -> dict:
 
     session["config"] = cfg
     session["stage"] = "gds_uploaded"
+    session["wizard_step"] = 4
+    session["ui_view"] = "gds"
     confirmed = set(session.get("confirmed", []))
     confirmed.update(["topology", "resonator_size", "uploaded_gds"])
     session["confirmed"] = sorted(confirmed)
 
-    msg = (
-        f"Parsed uploaded layout **`{gds_info['file_name']}`** (cell `{gds_info['cell_name']}`, "
-        f"core layer `{gds_info['selected_core_layer'][0]}/{gds_info['selected_core_layer'][1]}`):\n"
-        f"- **Detected Topology**: `{ext['topology_display']}` ({ext['ports_detected']}-port)\n"
-        f"- **Measured XY Geometry**: `R = {ext['ring_radius_um']:.3f} um`, `W_ring = {ext['ring_width_um']:.3f} um`, "
-        f"`W_bus = {ext['bus_width_um']:.3f} um`, `gap_thru = {ext['gap_thru_um']*1000:.1f} nm`"
-        + (f", `L_s = {ext['straight_length_um']:.2f} um`" if ext["straight_length_um"] > 0 else "")
-        + (f", `theta_pulley = {ext['pulley_angle_thru_deg']:.1f} deg`" if "pulley" in ext["topology"] else "")
-        + "\n\n"
-        "Because GDSII is a 2D planar mask, please **confirm the vertical wafer stack** "
-        "(`Core Material`, `H_film`, `H_slab`, `Cladding`, `Wavelength`) so I can solve the 2D bent eigenmodes and optical spectrum:"
-    )
-    chips = [
-        {"label": "220 nm SOI + Simulate GDS", "prompt": "220 nm SOI strip, SiO2 clad, TE0 at 1550 nm, simulate"},
-        {"label": "400 nm Si3N4 + Simulate GDS", "prompt": "400 nm Si3N4 strip, SiO2 clad, TE0 at 1550 nm, simulate"},
-        {"label": "600 nm 4H-SiC + Simulate GDS", "prompt": "600 nm 4H-SiC strip, SiO2 clad, TE0 at 1550 nm, simulate"},
-        {"label": "600 nm X-cut TFLN (300nm slab) + Simulate", "prompt": "600 nm X-cut TFLN with 300 nm slab, SiO2 clad, TE0 at 1550 nm, simulate"},
-    ]
+    if zh:
+        msg = (
+            f"📐 **已成功解析版图 `{gds_info['file_name']}`**（单元 `{gds_info['cell_name']}`，图层 `{gds_info['selected_core_layer'][0]}/{gds_info['selected_core_layer'][1]}`）：\n"
+            f"- **识别拓扑**：`{ext['topology_display']}`（{ext['ports_detected']} 端口）\n"
+            f"- **多边形几何测量**：`R = {ext['ring_radius_um']:.3f} µm`，`W_ring = {ext['ring_width_um']:.3f} µm`，`W_bus = {ext['bus_width_um']:.3f} µm`，`耦合间距 gap = {ext['gap_thru_um']*1000:.1f} nm`"
+            + (f"，`L_s = {ext['straight_length_um']:.2f} µm`" if ext["straight_length_um"] > 0 else "")
+            + (f"，`包角 θ = {ext['pulley_angle_thru_deg']:.1f}°`" if "pulley" in ext["topology"] else "")
+            + "\n\n**下一步**：请选择您的**晶圆叠层与波导传播损耗 (`dB/cm`)**，我将立即计算该版图的本征模与透射光谱："
+        )
+        chips = [
+            {"label": "220 nm SOI (损耗 2.0 dB/cm) → 仿真", "prompt": "220 nm SOI 条形波导, SiO2包层, 损耗 2.0 dB/cm, TE0 @ 1550 nm, 开始仿真"},
+            {"label": "400 nm Si3N4 (损耗 0.35 dB/cm) → 仿真", "prompt": "400 nm Si3N4 条形波导, SiO2包层, 损耗 0.35 dB/cm, TE0 @ 1550 nm, 开始仿真"},
+            {"label": "600 nm 4H-SiC (损耗 0.6 dB/cm) → 仿真", "prompt": "600 nm 4H-SiC 条形波导, SiO2包层, 损耗 0.6 dB/cm, TE0 @ 1550 nm, 开始仿真"},
+            {"label": "600 nm X切铌酸锂 (300nm平板) → 仿真", "prompt": "600 nm X切铌酸锂 300 nm 平板, SiO2包层, 损耗 0.25 dB/cm, TE0 @ 1550 nm, 开始仿真"},
+        ]
+    else:
+        msg = (
+            f"📐 **Parsed Uploaded Layout `{gds_info['file_name']}`** (cell `{gds_info['cell_name']}`, "
+            f"layer `{gds_info['selected_core_layer'][0]}/{gds_info['selected_core_layer'][1]}`):\n"
+            f"- **Detected Topology**: `{ext['topology_display']}` ({ext['ports_detected']}-port)\n"
+            f"- **Measured XY Geometry**: `R = {ext['ring_radius_um']:.3f} µm`, `W_ring = {ext['ring_width_um']:.3f} µm`, "
+            f"`W_bus = {ext['bus_width_um']:.3f} µm`, `gap = {ext['gap_thru_um']*1000:.1f} nm`"
+            + (f", `L_s = {ext['straight_length_um']:.2f} µm`" if ext["straight_length_um"] > 0 else "")
+            + (f", `θ = {ext['pulley_angle_thru_deg']:.1f}°`" if "pulley" in ext["topology"] else "")
+            + "\n\n**Next Step**: Pick your **vertical wafer stack & propagation loss (`dB/cm`)** to compute the optical spectrum:"
+        )
+        chips = [
+            {"label": "220 nm SOI (2.0 dB/cm) → Simulate", "prompt": "220 nm SOI strip, SiO2 clad, loss = 2.0 dB/cm, TE0 at 1550 nm, simulate"},
+            {"label": "400 nm Si3N4 (0.35 dB/cm) → Simulate", "prompt": "400 nm Si3N4 strip, SiO2 clad, loss = 0.35 dB/cm, TE0 at 1550 nm, simulate"},
+            {"label": "600 nm 4H-SiC (0.6 dB/cm) → Simulate", "prompt": "600 nm 4H-SiC strip, SiO2 clad, loss = 0.6 dB/cm, TE0 at 1550 nm, simulate"},
+            {"label": "600 nm X-cut TFLN (300nm slab) → Simulate", "prompt": "600 nm X-cut TFLN with 300 nm slab, SiO2 clad, loss = 0.25 dB/cm, TE0 at 1550 nm, simulate"},
+        ]
+
     session["history"] = (session.get("history", []) + [{"role": "assistant", "content": msg}])[-16:]
     return {
         "session": session,
         "assistant_message": msg,
         "chips": chips,
+        "ui_view": "gds",
+        "wizard_step": 4,
         "active_tab": "tab-gds",
     }
 
 
 def _solve_radius_for_target_fsr(cfg: MRRDesignConfig, target_fsr_ghz: float | None, target_fsr_nm: float | None, ng_est: float) -> float:
-    """Compute ring radius `R` [um] that hits the user's requested FSR given group index `n_g`."""
     wl_m = cfg.wavelength_nm * 1e-9
     if target_fsr_ghz and target_fsr_ghz > 0:
         l_rt_m = C0_M_PER_S / (ng_est * target_fsr_ghz * 1e9)
@@ -762,27 +1113,205 @@ def _solve_radius_for_target_fsr(cfg: MRRDesignConfig, target_fsr_ghz: float | N
     return round(float(np.clip(r_um, 5.0, 800.0)), 2)
 
 
+def _get_topology_fsr_chips(wl_nm: float, zh: bool = False) -> list[dict[str, str]]:
+    if wl_nm > 3000.0:
+        if zh:
+            return [
+                {"label": "⭕ 点耦合圆环 · FSR 150 GHz", "prompt": "FSR 150 GHz, 点耦合两端口"},
+                {"label": "🎯 滑轮耦合圆环 · FSR 100 GHz", "prompt": "FSR 100 GHz, 滑轮两端口"},
+                {"label": "🏁 跑道型微环 · R = 65 µm", "prompt": "半径 65 um, 直波导 20 um, 跑道两端口"},
+                {"label": "🔀 四端口下载滤波环 · FSR 150 GHz", "prompt": "FSR 150 GHz, 四端口下载"},
+            ]
+        return [
+            {"label": "⭕ Point Circle · FSR 150 GHz", "prompt": "FSR 150 GHz, point circular all-pass"},
+            {"label": "🎯 Pulley Coupler · FSR 100 GHz", "prompt": "FSR 100 GHz, pulley all-pass"},
+            {"label": "🏁 Racetrack · R = 65 µm", "prompt": "R = 65 um, L_s = 20 um, racetrack all-pass"},
+            {"label": "🔀 4-Port Add-Drop · FSR 150 GHz", "prompt": "FSR 150 GHz, 4-port add-drop"},
+        ]
+    if zh:
+        return [
+            {"label": "⭕ 点耦合圆环 · FSR 200 GHz", "prompt": "FSR 200 GHz, 点耦合两端口"},
+            {"label": "🎯 滑轮包角耦合 (高Q) · FSR 100 GHz", "prompt": "FSR 100 GHz, 滑轮两端口"},
+            {"label": "🏁 跑道型微环 · FSR 100 GHz", "prompt": "FSR 100 GHz, 跑道两端口"},
+            {"label": "🔀 四端口 Add-Drop · FSR 150 GHz", "prompt": "FSR 150 GHz, 四端口下载"},
+            {"label": "🔬 双环游标滤波器 (Vernier)", "prompt": "半径 40 um, 双环游标四端口"},
+        ]
+    return [
+        {"label": "⭕ Point Circle · FSR 200 GHz", "prompt": "FSR 200 GHz, point circular all-pass"},
+        {"label": "🎯 Pulley (High-Q) · FSR 100 GHz", "prompt": "FSR 100 GHz, pulley all-pass"},
+        {"label": "🏁 Racetrack · FSR 100 GHz", "prompt": "FSR 100 GHz, racetrack all-pass"},
+        {"label": "🔀 4-Port Add-Drop · FSR 150 GHz", "prompt": "FSR 150 GHz, 4-port add-drop"},
+        {"label": "🔬 Dual-Ring Vernier Filter", "prompt": "R = 40 um, dual-ring Vernier add-drop"},
+    ]
+
+
+def _build_compact_ai_state(session: dict) -> str:
+    cfg = session.get("config") or {}
+    parts = [
+        f"stage={session.get('stage', 'welcome')}",
+        f"top={cfg.get('topology')}",
+        f"mat={cfg.get('core_material')}/{cfg.get('clad_material')}",
+        f"wl={cfg.get('wavelength_nm')}nm({cfg.get('polarization')})",
+        f"H={cfg.get('film_height_um')}um(slab={cfg.get('slab_height_um')}um)",
+        f"W_ring={cfg.get('ring_width_um')}um,R={cfg.get('ring_radius_um')}um,gap={cfg.get('gap_thru_um')}um",
+    ]
+    if cfg.get("alpha_loss_db_per_cm") is not None:
+        parts.append(f"loss={cfg.get('alpha_loss_db_per_cm')}dB/cm")
+    ws = session.get("last_width_sweep") or {}
+    if ws.get("single_mode_max_width_um"):
+        parts.append(f"W_SM={ws['single_mode_max_width_um']:.3f}um,ng={ws.get('ng_at_rec', 0):.4f}")
+    mm = (session.get("last_mrr_metrics") or {}).get("metrics") or {}
+    cc = (session.get("last_mrr_metrics") or {}).get("critical_coupling") or {}
+    if mm:
+        parts.append(
+            f"FSR={mm.get('FSR_GHz')}GHz,Q_int={mm.get('Q_int'):.0f},Q_L={mm.get('Q_loaded'):.0f},"
+            f"ER={mm.get('ER_thru_dB')}dB,CC={cc.get('parameter')}={cc.get('recommended_value')}{cc.get('unit','')}"
+        )
+    return " | ".join(parts)
+
+
 def process_chat_turn(
     session: dict | None,
     user_message: str,
     *,
     gds_export_dir: str | Path,
     use_ollama: bool = False,
+    ai_mode: str = "offline",
+    ai_api_key: str | None = None,
+    lang: str | None = None,
 ) -> dict:
-    """Process one user message in the Conversational Photonics Copilot and run live physics."""
-    if not session:
-        session = create_initial_session()
+    """Process one user turn with local 2D FEM/CMT physics + optional Offline/Online AI (`Claude`/`Codex`/`Ollama`)."""
+    eff_mode = (ai_mode or ("ollama" if use_ollama else "offline")).lower().strip()
+    res = _process_chat_turn_core(
+        session,
+        user_message,
+        gds_export_dir=gds_export_dir,
+        lang=lang,
+    )
+    msg_clean = user_message.strip()
+    if (
+        eff_mode in ("ollama", "claude", "codex")
+        and msg_clean
+        and msg_clean.lower() not in ("reset", "__switch_lang__")
+        and not res.get("silent_ui_sync")
+    ):
+        sess_out = res.get("session") or {}
+        zh_flag = str(sess_out.get("lang", "en")).startswith("zh")
+        compact_state = _build_compact_ai_state(sess_out)
+        ai_note = query_ai_copilot(
+            ai_mode=eff_mode,
+            user_message=msg_clean,
+            compact_state=compact_state,
+            zh=zh_flag,
+            api_key=ai_api_key,
+        )
+        if ai_note:
+            res["assistant_message"] = f"{res['assistant_message']}\n\n---\n{ai_note}"
+            if sess_out.get("history"):
+                sess_out["history"][-1]["content"] = res["assistant_message"]
+    res["ai_mode"] = eff_mode
+    return res
 
+
+def _process_chat_turn_core(
+    session: dict | None,
+    user_message: str,
+    *,
+    gds_export_dir: str | Path,
+    lang: str | None = None,
+) -> dict:
+    """Core deterministic Guided Photonics Copilot (`en` or `zh`) + live local physics."""
     intent = parse_photonics_intent(user_message)
-    zh = intent["lang"] == "zh"
+    if lang:
+        zh = str(lang).lower().startswith("zh")
+    elif intent["lang"] == "zh":
+        zh = True
+    else:
+        zh = bool(session and str(session.get("lang", "en")).startswith("zh"))
+
+    eff_lang = "zh" if zh else "en"
+    if not session:
+        session = create_initial_session(lang=eff_lang)
+    session["lang"] = eff_lang
 
     if intent["action"] == "reset":
-        fresh = create_initial_session()
+        fresh = create_initial_session(lang=eff_lang)
         return {
             "session": fresh,
             "assistant_message": fresh["history"][-1]["content"],
-            "chips": get_welcome_chips(),
+            "chips": get_welcome_chips(lang=eff_lang),
+            "ui_view": "overview",
+            "wizard_step": 1,
             "active_tab": "tab-mrr",
+        }
+
+    if user_message.strip() == "__switch_lang__":
+        w_step = int(session.get("wizard_step") or 1)
+        cfg_cur = dict(session.get("config") or {})
+        conf_cur = set(session.get("confirmed") or [])
+        wl_cur = float(cfg_cur.get("wavelength_nm") or 1550.0)
+        mat_cur = str(cfg_cur.get("core_material") or "Si3N4")
+        preset_cur = PLATFORM_PRESETS.get("ScAlN_20" if mat_cur.startswith("ScAlN") else mat_cur, PLATFORM_PRESETS["Si3N4"])
+        if session.get("stage") == "welcome" or w_step <= 1:
+            fresh_welcome = create_initial_session(lang=eff_lang)["history"][-1]["content"]
+            if len(session.get("history") or []) <= 1:
+                session["history"] = [{"role": "assistant", "content": fresh_welcome}]
+            chips_lang = get_welcome_chips(lang=eff_lang)
+        elif w_step == 2:
+            chips_lang = _get_waveband_chips(zh)
+        elif w_step == 3:
+            chips_lang = _get_material_chips_for_wavelength(wl_cur, zh)
+        elif w_step == 4:
+            h_nm_c = round(float(cfg_cur.get("film_height_um", 0.40)) * 1000)
+            chips_lang = (
+                [
+                    {"label": f"✅ 保持推荐叠层 (H={h_nm_c} nm, TE0) → 求解模式", "prompt": "确认叠层并求解模式"},
+                    {"label": "🔄 切换为 TM0 偏振 → 求解模式", "prompt": "偏振 TM0, 确认叠层并求解模式"},
+                ]
+                if zh
+                else [
+                    {"label": f"✅ Keep Default Stack (H={h_nm_c} nm, TE0) → Solve Mode", "prompt": "Confirm stack and solve 2D modes"},
+                    {"label": "🔄 Switch to TM0 Polarization → Solve Mode", "prompt": "Polarization TM0, confirm stack and solve 2D modes"},
+                ]
+            )
+        elif w_step == 5 and "propagation_loss" not in conf_cur:
+            l_vals = preset_cur.get("loss_choices", [0.3, 0.8, 1.5, 3.0])
+            chips_lang = [
+                {
+                    "label": (f"损耗 α = {lv:g} dB/cm" if zh else f"Loss α = {lv:g} dB/cm"),
+                    "prompt": (f"传播损耗 = {lv:g} dB/cm" if zh else f"Propagation loss = {lv:g} dB/cm"),
+                }
+                for lv in l_vals
+            ]
+        elif w_step == 5:
+            chips_lang = _get_topology_fsr_chips(wl_cur, zh)
+        else:
+            cc_cur = (session.get("last_mrr_metrics") or {}).get("critical_coupling") or {}
+            rec_str = f" ({cc_cur['recommended_value']} {cc_cur['unit']})" if "recommended_value" in cc_cur else ""
+            chips_lang = (
+                [
+                    {"label": f"⚡ 一键应用临界耦合{rec_str}", "prompt": "临界耦合"},
+                    {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
+                    {"label": "🗂️ 导出 5 环扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
+                    {"label": "📏 扫描耦合间距 Gap", "prompt": "扫描间距"},
+                    {"label": "📉 扫描传播损耗 (dB/cm)", "prompt": "扫描损耗"},
+                ]
+                if zh
+                else [
+                    {"label": f"⚡ Apply Critical Coupling{rec_str}", "prompt": "Apply critical coupling"},
+                    {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
+                    {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
+                    {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap"},
+                    {"label": "📉 Sweep Loss (dB/cm)", "prompt": "Sweep propagation loss"},
+                ]
+            )
+        return {
+            "session": session,
+            "assistant_message": session["history"][-1]["content"] if session.get("history") else "",
+            "chips": chips_lang,
+            "ui_view": session.get("ui_view", "overview"),
+            "wizard_step": w_step,
+            "silent_ui_sync": True,
         }
 
     cfg_dict = dict(session["config"])
@@ -790,30 +1319,126 @@ def process_chat_turn(
     history = list(session.get("history", []))
     history.append({"role": "user", "content": user_message})
 
-    # Apply platform preset FIRST if user switched core material (preserving explicit overrides in the same message)
+    # Guided Workflow Entry: Lab Spectrum Loss & Q Extractor
+    if intent["action"] == "open_spectrum_fitter":
+        session["stage"] = "spectrum_fitter"
+        session["wizard_step"] = 1
+        session["ui_view"] = "fit"
+        msg = (
+            "📈 **实测光谱波导传播损耗 (`dB/cm`) 与 Q 值提取**\n\n"
+            "我已在右侧打开**实验光谱 CMT 拟合面板**并加载了一条高 Q 双峰示例数据：\n"
+            "1. 点击右侧 **`📂 上传实验 .CSV / .TXT`**（自动兼容线性透过率或 `dB`/`dBm` 数据），或点击示例按钮。\n"
+            "2. 填入群折射率 `n_g`（或选择 **`宽谱多谐振峰 Multi-FSR`**，直接从谐振峰间距同时自洽提取 `n_g` 与损耗 `α [dB/cm]`！）。\n"
+            "3. 提取完成后，点击绿色按钮 **`🎯 使用该损耗设计新微环`** 即可一键带入临界耦合设计！"
+            if zh
+            else "📈 **Lab Spectrum Propagation Loss (`dB/cm`) & Q Extractor**\n\n"
+            "I've opened the **Lab Spectrum CMT Fitter** on the right and loaded a sample high-Q doublet trace:\n"
+            "1. Click **`📂 Upload Lab .CSV / .TXT`** on the right (accepts either linear power OR `dB`/`dBm` traces!), or try the demo spectra.\n"
+            "2. Enter your **Group Index `n_g`** (or pick **`Broadband Multi-FSR`** to extract BOTH `n_g` and `α [dB/cm]` directly from resonance spacing!).\n"
+            "3. Click **`🎯 Design Ring with α`** to feed your measured `dB/cm` straight into critical-coupling design!"
+        )
+        chips = (
+            [{"label": "✨ 或开始逐步设计新微环", "prompt": "开始逐步设计微环"}]
+            if zh
+            else [{"label": "✨ Or Start Step-by-Step Ring Design", "prompt": "Start step-by-step microring design"}]
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "ui_view": "fit",
+            "auto_demo_fit": True,
+            "wizard_step": 1,
+            "active_tab": "tab-fit",
+        }
+
+    # Guided Workflow Entry: Upload GDS
+    if intent["action"] == "open_gds_uploader":
+        session["stage"] = "awaiting_gds"
+        session["wizard_step"] = 1
+        session["ui_view"] = "gds"
+        msg = (
+            "📐 **上传 `.GDS` 或 `.OAS` 版图文件**\n\n"
+            "请点击右侧面板顶部的 **`📂 上传 .GDS / .OAS`** 选择您的版图文件。我将自动从多边形提取半径 `R`、波导宽 `W`、耦合间距 `gap` 与包角，随后只需确认膜厚与损耗 (`dB/cm`) 即可计算透射光谱！"
+            if zh
+            else "📐 **Upload Your `.GDS` or `.OAS` Layout**\n\n"
+            "Click **`📂 Upload .GDS / .OAS`** on the right panel. "
+            "I will automatically measure `R`, `W_ring`, `W_bus`, `gap`, and coupler geometry from the polygons, "
+            "then ask for your wafer thickness & propagation loss (`dB/cm`) to simulate its optical spectrum!"
+        )
+        chips = (
+            [{"label": "✨ 或从零逐步设计新微环", "prompt": "开始逐步设计微环"}]
+            if zh
+            else [{"label": "✨ Or Design a New Ring from Scratch", "prompt": "Start step-by-step microring design"}]
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "ui_view": "gds",
+            "wizard_step": 1,
+            "active_tab": "tab-gds",
+        }
+
+    # Guided Step 1 -> Step 2: Ask Waveband
+    if intent["action"] == "start_guided":
+        session["stage"] = "ask_waveband"
+        session["wizard_step"] = 2
+        session["ui_view"] = "overview"
+        msg = (
+            "**第 2 / 6 步 — 选择工作波长波段** 🌈\n\n"
+            "您的器件工作在哪个光学波段？\n"
+            "*（可点击下方常用波段按钮，或直接输入 `400 nm – 14000 nm` 之间的任意精确波长，例如 `737 nm` 或 `1530 nm`。）*"
+            if zh
+            else "**Step 2 of 6 — Target Wavelength Band** 🌈\n\n"
+            "Which optical wavelength band does your device operate in?\n"
+            "*(Click a band below, or type any exact wavelength from `400 nm` to `14000 nm`, e.g. `737 nm` or `1530 nm`.)*"
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": _get_waveband_chips(zh),
+            "ui_view": "overview",
+            "wizard_step": 2,
+            "active_tab": "tab-mrr",
+        }
+
+    # Apply platform preset FIRST if user switched core material (preserving prior explicit wavelength in guided mode!)
+    explicit_keys = set(intent["fields"].keys())
+    prev_wl = float(cfg_dict.get("wavelength_nm", 1550.0))
+    keep_prior_wl = ("wavelength" in confirmed) and ("wavelength_nm" not in explicit_keys)
+
     new_mat = intent["fields"].get("core_material")
     if new_mat and (new_mat != cfg_dict.get("core_material") or "core_material" not in confirmed):
         preset_key = "ScAlN_20" if new_mat.startswith("ScAlN") else new_mat
         if preset_key in PLATFORM_PRESETS and "uploaded_gds" not in confirmed:
             for pk, pv in PLATFORM_PRESETS[preset_key].items():
-                if pk != "w_sweep":
+                if pk not in ("w_sweep", "loss_choices"):
+                    if pk == "wavelength_nm" and keep_prior_wl:
+                        continue
                     cfg_dict[pk] = pv
         elif preset_key in PLATFORM_PRESETS and "uploaded_gds" in confirmed:
-            # Keep GDS XY layout dimensions, only apply vertical stack defaults!
             for pk in ("film_height_um", "slab_height_um", "sidewall_deg", "clad_material", "top_clad_material", "wavelength_nm"):
                 if pk in PLATFORM_PRESETS[preset_key]:
+                    if pk == "wavelength_nm" and keep_prior_wl:
+                        continue
                     cfg_dict[pk] = PLATFORM_PRESETS[preset_key][pk]
         confirmed.add("core_material")
 
     # Apply parsed fields
-    explicit_keys = set(intent["fields"].keys())
-    prev_wl = float(cfg_dict.get("wavelength_nm", 1550.0))
     for k, v in intent["fields"].items():
         cfg_dict[k] = v
+        if k == "wavelength_nm":
+            confirmed.add("wavelength")
         if k in ("film_height_um", "slab_height_um", "sidewall_deg", "top_clad_material", "clad_material"):
             confirmed.add("wafer_stack")
         if k == "polarization":
             confirmed.add("polarization")
+        if k == "alpha_loss_db_per_cm":
+            confirmed.add("propagation_loss")
         if k == "topology":
             confirmed.add("topology")
         if k in ("ring_radius_um", "gap_thru_um", "pulley_angle_thru_deg", "straight_length_um"):
@@ -821,15 +1446,24 @@ def process_chat_turn(
         if k in ("ring_width_um", "bus_width_um"):
             confirmed.add("explicit_widths")
 
-    # Scale defaults if user selected a non-default waveband (Visible / 1310 / SWIR / Mid-IR)
+    # Scale defaults if user selected a non-default waveband
     scaled_w_sweep: tuple[float, float] | None = None
-    if "wavelength_nm" in explicit_keys and "uploaded_gds" not in confirmed:
-        new_wl = float(cfg_dict["wavelength_nm"])
-        if abs(new_wl - prev_wl) > 25.0 or new_mat is not None:
-            scaled_w_sweep = scale_preset_for_wavelength(cfg_dict, new_wl, explicit_keys)
+    if ("wavelength_nm" in explicit_keys or (new_mat is not None and keep_prior_wl)) and "uploaded_gds" not in confirmed:
+        cur_wl = float(cfg_dict["wavelength_nm"])
+        if abs(cur_wl - prev_wl) > 25.0 or new_mat is not None:
+            scaled_w_sweep = scale_preset_for_wavelength(cfg_dict, cur_wl, explicit_keys)
             session["last_width_sweep"] = None
 
-    # Handle port count toggle (`4-port add-drop` vs `2-port all-pass`) without changing coupler type
+    if "q_int_target" in intent["targets"]:
+        q_target = float(intent["targets"]["q_int_target"])
+        ng_ref = (session.get("last_width_sweep") or {}).get("ng_at_rec") or 2.15
+        cfg_dict["alpha_loss_db_per_cm"] = round(
+            q_int_to_loss_db_per_cm(q_target, float(ng_ref), float(cfg_dict["wavelength_nm"])), 4
+        )
+        confirmed.add("propagation_loss")
+    elif intent["targets"].get("confirm_default_loss"):
+        confirmed.add("propagation_loss")
+
     if "ports" in intent["targets"] and "topology" not in intent["fields"]:
         want_4 = intent["targets"]["ports"] == 4
         cur_t = cfg_dict["topology"]
@@ -855,6 +1489,33 @@ def process_chat_turn(
     cfg = _dict_to_cfg(cfg_dict)
 
     # ------------------------------------------------------------------
+    # Guided Step 2 -> Step 3: Wavelength set, Core Material NOT yet set
+    # ------------------------------------------------------------------
+    if "core_material" not in confirmed and "wavelength" in confirmed:
+        wl_now = float(cfg_dict["wavelength_nm"])
+        session["stage"] = "ask_material"
+        session["wizard_step"] = 3
+        session["ui_view"] = "overview"
+        msg = (
+            f"**第 3 / 6 步 — 选择波导芯层材料** 💎\n\n"
+            f"工作波长已设为 **`{wl_now:g} nm`**。请选择您的晶圆波导芯层材料：\n"
+            f"*（下方已自动筛选在 `{wl_now:g} nm` 透明的材料平台，您也可直接输入材料名。）*"
+            if zh
+            else f"**Step 3 of 6 — Waveguide Core Material** 💎\n\n"
+            f"Operating at **`{wl_now:g} nm`**. Which waveguide core material is on your wafer?\n"
+            f"*(Showing platforms transparent around `{wl_now:g} nm` below, or type any material name.)*"
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": _get_material_chips_for_wavelength(wl_now, zh),
+            "ui_view": "overview",
+            "wizard_step": 3,
+            "active_tab": "tab-mrr",
+        }
+
+    # ------------------------------------------------------------------
     # Direct Action 1: Apply Critical Coupling (`g_CC` / `theta_CC` / `L_s,CC`)
     # ------------------------------------------------------------------
     if intent["action"] == "apply_critical_coupling":
@@ -876,25 +1537,45 @@ def process_chat_turn(
             "critical_coupling": mrr_res["critical_coupling"],
         }
         session["stage"] = "mrr_synthesized"
+        session["wizard_step"] = 6
+        session["ui_view"] = "mrr"
         m = mrr_res["metrics"]
-        msg = (
-            f"Applied synthesized critical-coupling target **`{p_name} = {cc['recommended_value']} {cc['unit']}`** and re-solved:\n"
-            f"- **Loaded / Intrinsic Q**: `Q_L = {m['Q_loaded']:,.0f}` | `Q_int = {m['Q_int']:,.0f}` (`Q_ext = {m['Q_ext_thru']:,.0f}`)\n"
-            f"- **Through Extinction Ratio**: **`{m['ER_thru_dB']:.1f} dB`** (`FSR = {m['FSR_GHz']:.2f} GHz` / `{m['FSR_nm']:.3f} nm`)\n\n"
-            "Would you like to run a **fabrication tolerance sweep** around this point or **export the `.gds` layout**?"
-        )
-        chips = [
-            {"label": "Sweep Coupler Gap", "prompt": "Sweep gap around current design"},
-            {"label": "Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
-            {"label": "Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
-            {"label": "Sweep Heater Delta_T (0 to 40 K)", "prompt": "Sweep temperature from 0 to 40 K"},
-        ]
+        if zh:
+            msg = (
+                f"⚡ **已针对损耗 `α = {m['alpha_loss_db_per_cm']:.2f} dB/cm` 应用临界耦合参数 (`{p_name} = {cc['recommended_value']} {cc['unit']}`)**：\n"
+                f"- **直通端消光比**: **`{m['ER_thru_dB']:.1f} dB`**（`FSR = {m['FSR_GHz']:.2f} GHz` / `{m['FSR_nm']:.3f} nm`）\n"
+                f"- **品质因数**: `Q_loaded = {m['Q_loaded']:,.0f}`（`Q_int = {m['Q_int']:,.0f}`，`Q_ext = {m['Q_ext_thru']:,.0f}`）\n\n"
+                "您可以继续运行**间距/损耗容差扫描**，或直接**生成 `.GDS` 流片版图**："
+            )
+            chips = [
+                {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
+                {"label": "🗂️ 导出 5 环参数扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
+                {"label": "📏 扫描耦合间距 Gap", "prompt": "扫描间距"},
+                {"label": "📉 扫描传播损耗 (dB/cm) 容差", "prompt": "扫描损耗"},
+                {"label": "🌡️ 扫描热光温升 ΔT (0–40 K)", "prompt": "扫描温度 0 到 40 K"},
+            ]
+        else:
+            msg = (
+                f"⚡ **Applied Critical Coupling (`{p_name} = {cc['recommended_value']} {cc['unit']}`)** for **`α = {m['alpha_loss_db_per_cm']:.2f} dB/cm`**:\n"
+                f"- **Extinction Ratio**: **`{m['ER_thru_dB']:.1f} dB`** (`FSR = {m['FSR_GHz']:.2f} GHz` / `{m['FSR_nm']:.3f} nm`)\n"
+                f"- **Quality Factors**: `Q_loaded = {m['Q_loaded']:,.0f}` (`Q_int = {m['Q_int']:,.0f}`, `Q_ext = {m['Q_ext_thru']:,.0f}`)\n\n"
+                "Would you like to **sweep gap / propagation loss tolerances** or **export your `.GDS` layout**?"
+            )
+            chips = [
+                {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
+                {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
+                {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap around current design"},
+                {"label": "📉 Sweep Loss (dB/cm) Tolerance", "prompt": "Sweep propagation loss"},
+                {"label": "🌡️ Sweep Heater ΔT (0 to 40 K)", "prompt": "Sweep temperature from 0 to 40 K"},
+            ]
         session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
         return {
             "session": session,
             "assistant_message": msg,
             "chips": chips,
             "mrr_result": mrr_res,
+            "ui_view": "mrr",
+            "wizard_step": 6,
             "active_tab": "tab-mrr",
         }
 
@@ -910,10 +1591,15 @@ def process_chat_turn(
             lyp_path = write_klayout_layer_props(Path(gds_path).with_suffix(".lyp"))
             gds_view = analyze_uploaded_gds(gds_path)
             msg = (
-                f"Generated foundry-ready single-device layout & KLayout layer file:\n"
-                f"- **GDSII File**: `{Path(gds_path).name}` (`R = {cfg.ring_radius_um} um`, `W_ring = {cfg.ring_width_um} um`, `gap = {cfg.gap_thru_um*1000:.0f} nm`)\n"
+                f"💾 **已生成流片级 `.GDS` 版图与 KLayout 图层文件**：\n"
+                f"- **GDSII 文件**: `{Path(gds_path).name}`（`R = {cfg.ring_radius_um} µm`，`W_ring = {cfg.ring_width_um} µm`，`gap = {cfg.gap_thru_um*1000:.0f} nm`）\n"
+                f"- **KLayout 配色文件**: `{Path(lyp_path).name}`\n\n"
+                "请点击右侧绿色按钮下载 `.GDS` 文件，或在画布中缩放查看多边形与间距标尺！"
+                if zh
+                else f"💾 **Generated Foundry-Ready `.GDS` Mask & KLayout `.LYP`**:\n"
+                f"- **GDSII File**: `{Path(gds_path).name}` (`R = {cfg.ring_radius_um} µm`, `W_ring = {cfg.ring_width_um} µm`, `gap = {cfg.gap_thru_um*1000:.0f} nm`)\n"
                 f"- **KLayout Layer Map**: `{Path(lyp_path).name}`\n\n"
-                "I have loaded the generated polygons into the **GDS Upload & Mask Creator** tab so you can inspect every layer or download the files directly."
+                "Click the green **Download `.GDS`** button on the right to save your mask!"
             )
         else:
             p_name = TOPOLOGY_CATALOG[cfg.topology]["coupler_param"]
@@ -927,24 +1613,106 @@ def process_chat_turn(
             lyp_path = str(Path(gds_path).with_suffix(".lyp"))
             gds_view = analyze_uploaded_gds(gds_path)
             msg = (
-                f"Created 5-device MPW parameter-sweep array **`{Path(gds_path).name}`** sweeping `{p_name}` across `{vals}`:\n"
-                f"- Includes optical port pins (`65/0`), heater/GSG pads (`10/0`, `11/0`), device labels (`66/0`), and KLayout `{Path(lyp_path).name}`."
+                f"🗂️ **已生成 5 器件 MPW 参数扫描阵列版图 `{Path(gds_path).name}`**\n"
+                f"- 扫描 `{p_name}`：`{vals}`，用于覆盖流片刻蚀与损耗波动以锁定片上临界耦合。\n"
+                f"- 含端口引脚 (`65/0`)、热光/电光焊盘 (`10/0`, `11/0`) 及 KLayout `{Path(lyp_path).name}`。"
+                if zh
+                else f"🗂️ **Generated 5-Ring MPW Parameter-Sweep Array `{Path(gds_path).name}`**\n"
+                f"- Sweeps `{p_name}` across `{vals}` to guarantee critical coupling on-wafer despite etch/loss variations.\n"
+                f"- Includes port pins (`65/0`), heater/GSG pads (`10/0`, `11/0`), and KLayout `{Path(lyp_path).name}`."
             )
-        chips = [
-            {"label": "Back to MRR Spectrum", "prompt": "Simulate current MRR"},
-            {"label": "Sweep Coupler Gap", "prompt": "Sweep gap"},
-        ]
+        session["wizard_step"] = 6
+        session["ui_view"] = "gds"
+        chips = (
+            [
+                {"label": "📊 返回微环透射光谱", "prompt": "开始仿真"},
+                {"label": "📏 扫描耦合间距", "prompt": "扫描间距"},
+            ]
+            if zh
+            else [
+                {"label": "📊 Back to MRR Spectrum", "prompt": "Simulate current MRR"},
+                {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap"},
+            ]
+        )
         session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
         return {
             "session": session,
             "assistant_message": msg,
             "chips": chips,
             "gds_export": {"gds_path": gds_path, "lyp_path": lyp_path, "gds_view": gds_view},
+            "ui_view": "gds",
+            "wizard_step": 6,
             "active_tab": "tab-gds",
         }
 
     # ------------------------------------------------------------------
-    # Direct Action 3: Waveguide Width Dispersion & Single-Mode Check
+    # Guided Step 3 -> Step 4 Pre-Check: Material chosen, ask to confirm Wafer Stack
+    # ------------------------------------------------------------------
+    if (
+        "core_material" in confirmed
+        and "wafer_stack" not in confirmed
+        and session.get("last_width_sweep") is None
+        and "resonator_size" not in confirmed
+        and "topology" not in confirmed
+        and intent["action"] not in ("sweep_width", "simulate_mrr", "sweep_mrr")
+        and "uploaded_gds" not in confirmed
+    ):
+        session["stage"] = "ask_stack"
+        session["wizard_step"] = 4
+        session["ui_view"] = "overview"
+        h_nm = round(cfg.film_height_um * 1000)
+        s_nm = round(cfg.slab_height_um * 1000)
+        rib_sug_nm = max(40, round(0.35 * h_nm / 10) * 10)
+        if zh:
+            etch_desc = "全刻蚀条形波导 (`0 nm` 平板层)" if s_nm == 0 else f"浅刻蚀脊形波导 (`{s_nm} nm` 平板层)"
+            msg = (
+                f"**第 4 / 6 步 — 确认晶圆叠层与偏振态** 🧱\n\n"
+                f"针对 **`{cfg.core_material}`**（`@ {cfg.wavelength_nm:g} nm`），已为您预填标准工艺截面：\n"
+                f"- **芯层总膜厚 (`H_film`)**：`{h_nm} nm` — {etch_desc}\n"
+                f"- **包层与基底**：上包层 `{cfg.top_clad_material}` / 下包层 `{cfg.clad_material}`（侧壁角 `{cfg.sidewall_deg:.0f}°`）\n"
+                f"- **偏振模式**：`{cfg.polarization}`\n\n"
+                "是否符合您的晶圆规格？点击**确认**即可求解二维矢量本征模与单模截止宽度（也可直接输入如 `膜厚 500 nm, 空气包层`）："
+            )
+            chips = [
+                {"label": "✅ 确认叠层并求解二维模式", "prompt": "确认叠层并求解模式"},
+                {"label": "🌤️ 改为空气上包层 + 求解模式", "prompt": "空气包层, 确认叠层"},
+                {
+                    "label": f"🧱 改为脊形波导 ({rib_sug_nm} nm 平板) + 求解" if s_nm == 0 else "🔪 改为全刻蚀条形波导 + 求解",
+                    "prompt": f"{rib_sug_nm} nm 平板, 确认叠层" if s_nm == 0 else "条形波导, 确认叠层",
+                },
+                {"label": "🔄 切换为 TM0 偏振 + 求解模式", "prompt": "TM0, 确认叠层"},
+            ]
+        else:
+            etch_desc = "Full-etch strip (`0 nm` slab)" if s_nm == 0 else f"Partial-etch rib (`{s_nm} nm` slab)"
+            msg = (
+                f"**Step 4 of 6 — Confirm Wafer Stack & Polarization** 🧱\n\n"
+                f"For **`{cfg.core_material}`** at **`{cfg.wavelength_nm:g} nm`**, I pre-filled this standard cross-section:\n"
+                f"- **Film Thickness (`H_film`)**: `{h_nm} nm` — {etch_desc}\n"
+                f"- **Cladding**: `{cfg.top_clad_material}` top / `{cfg.clad_material}` bottom (`{cfg.sidewall_deg:.0f}°` sidewall)\n"
+                f"- **Polarization**: `{cfg.polarization}`\n\n"
+                "Does this match your wafer? Click **Confirm** to solve 2D Maxwell eigenmodes, or type custom thickness/cladding (e.g. `H_film = 500 nm, air clad`):"
+            )
+            chips = [
+                {"label": "✅ Confirm Stack & Solve 2D Modes", "prompt": "Confirm stack and check mode"},
+                {"label": "🌤️ Air Top Cladding + Solve Modes", "prompt": "Air top cladding, confirm stack"},
+                {
+                    "label": f"🧱 Rib ({rib_sug_nm} nm slab) + Solve" if s_nm == 0 else "🔪 Full-Etch Strip (0 nm slab) + Solve",
+                    "prompt": f"{rib_sug_nm} nm slab, confirm stack" if s_nm == 0 else "Full-etch strip, confirm stack",
+                },
+                {"label": "🔄 Switch to TM0 + Solve Modes", "prompt": "TM0 polarization, confirm stack"},
+            ]
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "ui_view": "overview",
+            "wizard_step": 4,
+            "active_tab": "tab-mrr",
+        }
+
+    # ------------------------------------------------------------------
+    # Step 4 Action: Waveguide Width Dispersion & Single-Mode Check
     # ------------------------------------------------------------------
     preset_key = "ScAlN_20" if cfg.core_material.startswith("ScAlN") else cfg.core_material
     w_min_def, w_max_def = scaled_w_sweep or PLATFORM_PRESETS.get(preset_key, {"w_sweep": (0.45, 1.80)})["w_sweep"]
@@ -955,6 +1723,7 @@ def process_chat_turn(
             "core_material" in confirmed
             and session.get("last_width_sweep") is None
             and "resonator_size" not in confirmed
+            and "topology" not in confirmed
             and intent["action"] != "simulate_mrr"
             and "uploaded_gds" not in confirmed
         )
@@ -978,7 +1747,6 @@ def process_chat_turn(
             polarization=cfg.polarization,
             sc_fraction=cfg.sc_fraction,
         )
-        # Also solve 2D mode field at recommended ring width so Tab 3 shows crisp |E| field!
         if "explicit_widths" not in confirmed:
             cfg_dict["bus_width_um"] = w_res["recommended_bus_width_um"]
             cfg_dict["ring_width_um"] = w_res["recommended_ring_width_um"]
@@ -990,34 +1758,101 @@ def process_chat_turn(
         neff_est = float(w_res["neff_fundamental"][idx_mid])
         session["last_width_sweep"] = {**w_res, "ng_at_rec": ng_est, "neff_at_rec": neff_est}
         session["stage"] = "mode_confirmed"
+        session["wizard_step"] = 5
+        session["ui_view"] = "mode"
 
-        msg = (
-            f"Solved 2D full-vector Maxwell eigenmodes across `W = {w_min:.2f} – {w_max:.2f} um` on **`{cfg.core_material}`** "
-            f"(`H_film = {cfg.film_height_um*1000:.0f} nm`, `H_slab = {cfg.slab_height_um*1000:.0f} nm`, "
-            f"`{cfg.top_clad_material}` top clad, `{cfg.polarization}` @ `{cfg.wavelength_nm:.0f} nm`):\n"
-            f"- **Single-Mode Cutoff (`TE1`/`TM1` onset)**: `W_SM,max = {w_res['single_mode_max_width_um']:.3f} um`\n"
-            f"- **Recommended Widths**: `W_bus = {cfg.bus_width_um:.3f} um` (single-mode) & `W_ring = {cfg.ring_width_um:.3f} um` (`n_eff = {neff_est:.4f}`, `n_g = {ng_est:.4f}`)\n\n"
-            "**Next Step — Resonator & Coupler Specs**: What **target FSR** (e.g. `100 GHz` or `200 GHz`) or **radius `R`**, "
-            "and which **topology** (`Point Circular`, `Racetrack`, `Pulley Wrap-Around`, `4-Port Add-Drop`, `Vernier`) would you like?"
+        def_loss = float(
+            cfg.alpha_loss_db_per_cm
+            if cfg.alpha_loss_db_per_cm is not None
+            else MATERIAL_CATALOG.get(cfg.core_material, {}).get("typical_loss_db_cm", 1.0)
         )
-        chips = [
-            {"label": "FSR 200 GHz · Point All-Pass", "prompt": "FSR 200 GHz, point circular all-pass"},
-            {"label": "FSR 100 GHz · Pulley All-Pass", "prompt": "FSR 100 GHz, pulley all-pass"},
-            {"label": "FSR 100 GHz · 4-Port Add-Drop", "prompt": "FSR 100 GHz, 4-port add-drop"},
-            {"label": "R = 60 um · Racetrack All-Pass", "prompt": "R = 60 um, L_s = 20 um, racetrack all-pass"},
-            {"label": "Dual-Ring Vernier Filter", "prompt": "R = 40 um, dual-ring Vernier add-drop"},
-        ]
+        loss_opts = PLATFORM_PRESETS.get(preset_key, {}).get("loss_choices", [0.2, 0.5, 1.0, 2.0])
+
+        if zh:
+            msg = (
+                f"✅ **二维矢量本征模与单模截止计算完成**（`{cfg.core_material}`，`H = {cfg.film_height_um*1000:.0f} nm`，`{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`）：\n"
+                f"- **单模最大波导宽度 (`TE1`/`TM1` 截止)**：`W_SM,max = {w_res['single_mode_max_width_um']:.3f} µm`\n"
+                f"- **推荐波导宽度**：总线 `W_bus = {cfg.bus_width_um:.3f} µm`，环宽 `W_ring = {cfg.ring_width_um:.3f} µm`（`n_eff = {neff_est:.4f}`，`n_g = {ng_est:.4f}`）\n\n"
+                f"**第 5 / 6 步 — 波导传播损耗 (`dB/cm`)** 📉\n"
+                f"您的波导传播损耗 `α [dB/cm]` 大约是多少？（临界耦合间距/包角直接取决于波导损耗！您也可直接输入如 `损耗 0.8 dB/cm` 或 `Q_int = 300k`）："
+            )
+            chips = [
+                {"label": f"α = {loss_opts[0]:g} dB/cm (低损耗)", "prompt": f"传播损耗 = {loss_opts[0]:g} dB/cm"},
+                {"label": f"α = {loss_opts[1]:g} dB/cm (典型值)", "prompt": f"传播损耗 = {loss_opts[1]:g} dB/cm"},
+                {"label": f"α = {loss_opts[2]:g} dB/cm", "prompt": f"传播损耗 = {loss_opts[2]:g} dB/cm"},
+                {"label": f"α = {loss_opts[3]:g} dB/cm", "prompt": f"传播损耗 = {loss_opts[3]:g} dB/cm"},
+                {"label": "📈 先从实测光谱 .CSV 提取损耗", "prompt": "从实测光谱提取波导损耗"},
+            ]
+        else:
+            msg = (
+                f"✅ **2D Maxwell Mode & Single-Mode Cutoff Solved** (`{cfg.core_material}`, `H = {cfg.film_height_um*1000:.0f} nm`, `{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`):\n"
+                f"- **Single-Mode Cutoff (`TE1`/`TM1` onset)**: `W_SM,max = {w_res['single_mode_max_width_um']:.3f} µm`\n"
+                f"- **Selected Widths**: `W_bus = {cfg.bus_width_um:.3f} µm` & `W_ring = {cfg.ring_width_um:.3f} µm` (`n_eff = {neff_est:.4f}`, `n_g = {ng_est:.4f}`)\n\n"
+                f"**Step 5 of 6 — Waveguide Propagation Loss (`dB/cm`)** 📉\n"
+                f"What propagation loss `α [dB/cm]` do you know for your waveguide (or type `Q_int = ...`)?\n"
+                f"*(Critical-coupling gap/angle depends directly on loss — or pick a topology/FSR directly to use default `{def_loss:g} dB/cm`.)*"
+            )
+            chips = [
+                {"label": f"α = {loss_opts[0]:g} dB/cm (Low Loss)", "prompt": f"Propagation loss = {loss_opts[0]:g} dB/cm"},
+                {"label": f"α = {loss_opts[1]:g} dB/cm (Typical)", "prompt": f"Propagation loss = {loss_opts[1]:g} dB/cm"},
+                {"label": f"α = {loss_opts[2]:g} dB/cm", "prompt": f"Propagation loss = {loss_opts[2]:g} dB/cm"},
+                {"label": f"α = {loss_opts[3]:g} dB/cm", "prompt": f"Propagation loss = {loss_opts[3]:g} dB/cm"},
+                {"label": "📈 Extract Loss from Lab .CSV First", "prompt": "Extract waveguide loss from measured spectrum"},
+            ]
         session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
         return {
             "session": session,
             "assistant_message": msg,
             "chips": chips,
             "width_sweep_result": w_res,
+            "ui_view": "mode",
+            "wizard_step": 5,
             "active_tab": "tab-mode",
         }
 
     # ------------------------------------------------------------------
-    # Direct Action 4: MRR Parameter Sweep (`gap`, `pulley angle`, `L_s`, `R`, `Temp`, `Voltage`)
+    # Guided Step 5 -> Step 6 Question: Propagation Loss confirmed, ask Ring Topology & FSR
+    # ------------------------------------------------------------------
+    if (
+        "propagation_loss" in confirmed
+        and "resonator_size" not in confirmed
+        and "topology" not in confirmed
+        and intent["action"] not in ("simulate_mrr", "sweep_mrr")
+        and session.get("stage") in ("mode_confirmed", "loss_confirmed")
+    ):
+        session["stage"] = "loss_confirmed"
+        session["wizard_step"] = 5
+        session["ui_view"] = "mode"
+        ng_est = (session.get("last_width_sweep") or {}).get("ng_at_rec") or 2.15
+        alpha_now = float(
+            cfg.alpha_loss_db_per_cm
+            if cfg.alpha_loss_db_per_cm is not None
+            else MATERIAL_CATALOG.get(cfg.core_material, {}).get("typical_loss_db_cm", 1.0)
+        )
+        q_int_est = loss_db_per_cm_to_q_int(alpha_now, float(ng_est), cfg.wavelength_nm)
+        msg = (
+            f"📌 **已锁定传播损耗**：**`α = {alpha_now:.3g} dB/cm`** "
+            f"⇒ **本征品质因数 `Q_int ≈ {q_int_est:,.0f}`**（`n_g = {ng_est:.4f}` @ `{cfg.wavelength_nm:g} nm`）。\n\n"
+            "**最后一步 — 选择微环拓扑与目标自由光谱范围 (`FSR` 或半径 `R`)** 🎯\n"
+            "请选择您需要的微环架构与目标 `FSR`（也可直接输入如 `R = 35 um, 滑轮耦合`）："
+            if zh
+            else f"📌 **Propagation Loss Set**: **`α = {alpha_now:.3g} dB/cm`** "
+            f"⇒ **Intrinsic `Q_int ≈ {q_int_est:,.0f}`** (`n_g = {ng_est:.4f}` @ `{cfg.wavelength_nm:g} nm`).\n\n"
+            "**Final Design Step — Ring Topology & Target FSR (or Radius)** 🎯\n"
+            "Which resonator topology and Free Spectral Range (`FSR`) or radius (`R`) do you need?"
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": _get_topology_fsr_chips(cfg.wavelength_nm, zh),
+            "ui_view": "mode",
+            "wizard_step": 5,
+            "active_tab": "tab-mode",
+        }
+
+    # ------------------------------------------------------------------
+    # Direct Action 4: MRR Parameter Sweep
     # ------------------------------------------------------------------
     if intent["action"] == "sweep_mrr":
         sw = intent["sweep"]
@@ -1026,67 +1861,114 @@ def process_chat_turn(
         if rng:
             vals = np.linspace(rng[0], rng[1], 7).tolist()
         else:
-            cur = float(getattr(cfg, p_name))
-            if p_name == "gap_thru_um":
-                vals = np.linspace(max(0.10, cur - 0.10), cur + 0.12, 7).tolist()
-            elif p_name == "pulley_angle_thru_deg":
-                vals = np.linspace(max(3.0, cur * 0.35), min(120.0, max(cur * 1.8, 35.0)), 7).tolist()
-            elif p_name == "straight_length_um":
-                vals = np.linspace(2.0, max(cur * 2.0, 30.0), 7).tolist()
-            elif p_name == "ring_radius_um":
-                vals = np.linspace(max(10.0, cur * 0.6), cur * 1.5, 6).tolist()
-            elif p_name == "delta_temp_k":
-                vals = np.linspace(0.0, 50.0, 6).tolist()
+            if p_name == "alpha_loss_db_per_cm":
+                cur_l = float(
+                    cfg.alpha_loss_db_per_cm
+                    if cfg.alpha_loss_db_per_cm is not None
+                    else MATERIAL_CATALOG.get(cfg.core_material, {}).get("typical_loss_db_cm", 1.0)
+                )
+                vals = np.linspace(max(0.05, cur_l * 0.25), max(cur_l * 2.5, 2.0), 7).tolist()
             else:
-                vals = np.linspace(-15.0, 15.0, 7).tolist()
+                cur = float(getattr(cfg, p_name))
+                if p_name == "gap_thru_um":
+                    vals = np.linspace(max(0.10, cur - 0.10), cur + 0.12, 7).tolist()
+                elif p_name == "pulley_angle_thru_deg":
+                    vals = np.linspace(max(3.0, cur * 0.35), min(120.0, max(cur * 1.8, 35.0)), 7).tolist()
+                elif p_name == "straight_length_um":
+                    vals = np.linspace(2.0, max(cur * 2.0, 30.0), 7).tolist()
+                elif p_name == "ring_radius_um":
+                    vals = np.linspace(max(10.0, cur * 0.6), cur * 1.5, 6).tolist()
+                elif p_name == "delta_temp_k":
+                    vals = np.linspace(0.0, 50.0, 6).tolist()
+                else:
+                    vals = np.linspace(-15.0, 15.0, 7).tolist()
 
         sw_res = run_mrr_parameter_sweep(cfg, p_name, vals)
         best_i = sw_res["best_critical_coupling_index"]
         best_v = sw_res["values"][best_i]
         best_er = sw_res["ER_thru_dB"][best_i]
         best_ql = sw_res["Q_loaded"][best_i]
-        msg = (
-            f"Completed **{len(vals)}-point `{p_name}` sweep** from `{vals[0]:.3g}` to `{vals[-1]:.3g} {sw_res['unit']}`:\n"
-            f"- **Peak Extinction Point**: `{p_name} = {best_v:.4g} {sw_res['unit']}` -> `ER = {best_er:.1f} dB`, `Q_loaded = {best_ql:,.0f}`\n"
-            f"- **Resonance Shift Across Sweep**: `{sw_res['resonance_shift_pm'][0]:+.1f} pm` to `{sw_res['resonance_shift_pm'][-1]:+.1f} pm`\n\n"
-            "The parameter sweep curves (`ER` & `Q_loaded` vs parameter) are plotted on the right workbench."
-        )
-        chips = [
-            {"label": f"Set {p_name}={best_v:.3g} & Simulate", "prompt": f"Set {p_name.replace('_thru_um','').replace('_thru_deg',' angle')} = {best_v:.4g} {sw_res['unit']} and simulate"},
-            {"label": "Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
-        ]
+        session["wizard_step"] = 6
+        session["ui_view"] = "mrr"
+        if zh:
+            msg = (
+                f"📊 **已完成 {len(vals)} 点 `{p_name}` 参数扫描**（`{vals[0]:.3g}` → `{vals[-1]:.3g} {sw_res['unit']}`）：\n"
+                f"- **最大消光比工作点**：`{p_name} = {best_v:.4g} {sw_res['unit']}` → **`ER = {best_er:.1f} dB`**，`Q_loaded = {best_ql:,.0f}`\n"
+                + (
+                    f"- **对应本征 Q 范围**：`Q_int = {sw_res['Q_int'][0]:,.0f}` → `{sw_res['Q_int'][-1]:,.0f}`\n"
+                    if p_name == "alpha_loss_db_per_cm" and "Q_int" in sw_res
+                    else f"- **谐振波长漂移**：`{sw_res['resonance_shift_pm'][0]:+.1f} pm` → `{sw_res['resonance_shift_pm'][-1]:+.1f} pm`\n"
+                )
+            )
+            set_prompt = (
+                f"传播损耗 = {best_v:.4g} dB/cm, 开始仿真"
+                if p_name == "alpha_loss_db_per_cm"
+                else f"Set {p_name.replace('_thru_um','').replace('_thru_deg',' angle')} = {best_v:.4g} {sw_res['unit']} and simulate"
+            )
+            chips = [
+                {"label": f"采用 {best_v:.3g} {sw_res['unit']} 并仿真", "prompt": set_prompt},
+                {"label": "💾 导出单器件 .GDS", "prompt": "导出单个 GDS 版图"},
+                {"label": "🗂️ 导出 5 环阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
+            ]
+        else:
+            msg = (
+                f"📊 **Completed {len(vals)}-Point `{p_name}` Sweep** (`{vals[0]:.3g}` → `{vals[-1]:.3g} {sw_res['unit']}`):\n"
+                f"- **Peak Extinction Point**: `{p_name} = {best_v:.4g} {sw_res['unit']}` → **`ER = {best_er:.1f} dB`**, `Q_loaded = {best_ql:,.0f}`\n"
+                + (
+                    f"- **Intrinsic Q Range Across Loss**: `Q_int = {sw_res['Q_int'][0]:,.0f}` → `{sw_res['Q_int'][-1]:,.0f}`\n"
+                    if p_name == "alpha_loss_db_per_cm" and "Q_int" in sw_res
+                    else f"- **Resonance Shift**: `{sw_res['resonance_shift_pm'][0]:+.1f} pm` → `{sw_res['resonance_shift_pm'][-1]:+.1f} pm`\n"
+                )
+            )
+            set_prompt = (
+                f"Propagation loss = {best_v:.4g} dB/cm, simulate"
+                if p_name == "alpha_loss_db_per_cm"
+                else f"Set {p_name.replace('_thru_um','').replace('_thru_deg',' angle')} = {best_v:.4g} {sw_res['unit']} and simulate"
+            )
+            chips = [
+                {"label": f"Use {best_v:.3g} {sw_res['unit']} & Simulate", "prompt": set_prompt},
+                {"label": "💾 Export Single .GDS", "prompt": "Export single GDS layout"},
+                {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
+            ]
         session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
         return {
             "session": session,
             "assistant_message": msg,
             "chips": chips,
             "mrr_sweep_result": sw_res,
+            "ui_view": "mrr",
+            "wizard_step": 6,
             "active_tab": "tab-mrr",
         }
 
     # ------------------------------------------------------------------
-    # Stage 0 Fallback: If material still unknown, ask for Material & Stack
+    # Fallback: If material still unknown, guide user into Step 2 (Waveband)
     # ------------------------------------------------------------------
     if "core_material" not in confirmed:
+        session["wizard_step"] = 2
+        session["ui_view"] = "overview"
         msg = (
-            "Let's start with **Step 1 (Wafer Material & Stack)**.\n\n"
-            "Which waveguide core material and thickness do you want to use (e.g., `220 nm SOI`, "
-            "`400 nm Si3N4`, `600 nm 4H-SiC`, `600 nm X-cut TFLN`, `800 nm AlN / ScAlN`, or `Mid-IR Ge`), "
-            "or upload an existing `.gds` layout?"
+            "让我们**一步一步**来完成设计！\n\n"
+            "**第 2 / 6 步 — 选择工作波长波段**：您的器件工作在哪个波段？（可点击下方按钮、上传 `.GDS` 版图，或从实测 `.CSV` 光谱提取损耗。）"
+            if zh
+            else "Let's take it **one simple step at a time**!\n\n"
+            "**Step 2 of 6 — Target Wavelength Band**: Which optical wavelength band does your device use? "
+            "*(Click a band below, upload a `.GDS`, or extract `dB/cm` loss from a lab `.CSV` spectrum.)*"
         )
         session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
         return {
             "session": session,
             "assistant_message": msg,
-            "chips": get_welcome_chips(),
+            "chips": _get_waveband_chips(zh),
+            "ui_view": "overview",
+            "wizard_step": 2,
             "active_tab": "tab-mrr",
         }
 
     # ------------------------------------------------------------------
-    # Stage 3: Full 2D Eigenmode + Spatial CMT + Broadband MRR Synthesis
+    # Stage 6: Full 2D Eigenmode + Spatial CMT + Broadband MRR Synthesis
     # ------------------------------------------------------------------
     if (session.get("target_fsr_ghz") or session.get("target_fsr_nm")) and "ring_radius_um" not in intent["fields"]:
-        # Estimate n_g from cached width sweep or quick straight-mode evaluation
         ng_est = (session.get("last_width_sweep") or {}).get("ng_at_rec")
         if not ng_est:
             probe_res = simulate_mrr_topology(replace(cfg, num_spectrum_points=400))
@@ -1094,9 +1976,8 @@ def process_chat_turn(
         cfg_dict["ring_radius_um"] = _solve_radius_for_target_fsr(
             cfg, session.get("target_fsr_ghz"), session.get("target_fsr_nm"), ng_est
         )
-        # Widen spectrum window automatically so at least ~2.2 FSRs are visible
         fsr_nm_approx = (cfg.wavelength_nm ** 2) * 1e-3 / (2.0 * math.pi * cfg_dict["ring_radius_um"] * ng_est)
-        cfg_dict["span_nm"] = round(float(np.clip(2.4 * fsr_nm_approx, 3.0, 45.0)), 2)
+        cfg_dict["span_nm"] = round(float(np.clip(2.4 * fsr_nm_approx, 2.0, 90.0)), 2)
         session["config"] = cfg_dict
         cfg = _dict_to_cfg(cfg_dict)
         session["target_fsr_ghz"] = None
@@ -1107,43 +1988,56 @@ def process_chat_turn(
     cc = mrr_res["critical_coupling"]
     session["last_mrr_metrics"] = {"metrics": m, "critical_coupling": cc}
     session["stage"] = "mrr_synthesized"
+    session["wizard_step"] = 6
+    session["ui_view"] = "mrr"
 
-    summary = (
-        f"Synthesized **`{TOPOLOGY_CATALOG[cfg.topology]['name']}`** on **`{cfg.core_material}`** "
-        f"(`H = {cfg.film_height_um*1000:.0f} nm`, `slab = {cfg.slab_height_um*1000:.0f} nm`, "
-        f"`W_ring = {cfg.ring_width_um:.2f} um`, `W_bus = {cfg.bus_width_um:.2f} um`, `R = {cfg.ring_radius_um:.2f} um`, `{cfg.polarization}` @ `{cfg.wavelength_nm:.0f} nm`):\n"
-        f"- **Eigenmode Indices**: `n_eff = {m['neff_ring']:.5f}`, `n_g = {m['ng_ring']:.5f}`\n"
-        f"- **Free Spectral Range**: **`{m['FSR_GHz']:.2f} GHz`** (`{m['FSR_nm']:.3f} nm`)\n"
-        f"- **Quality Factors**: `Q_loaded = {m['Q_loaded']:,.0f}` (`Q_int = {m['Q_int']:,.0f}`, `Q_ext = {m['Q_ext_thru']:,.0f}`)\n"
-        f"- **Coupling Regime**: `{cc['regime']}` (`ER = {m['ER_thru_dB']:.1f} dB`, `kappa^2 = {m['kappa_power_thru']:.4f}`)\n"
-        f"- **Critical-Coupling Target**: **`{cc['parameter']} = {cc['recommended_value']} {cc['unit']}`**"
-    )
+    if zh:
+        summary = (
+            f"🎯 **已完成 `{TOPOLOGY_CATALOG[cfg.topology]['name']}` 微环综合**（**`{cfg.core_material}`**，"
+            f"`H = {cfg.film_height_um*1000:.0f} nm`，`W_ring = {cfg.ring_width_um:.2f} µm`，`R = {cfg.ring_radius_um:.2f} µm`，`{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`）：\n"
+            f"- **波导传播损耗与本征 Q**：**`α = {m['alpha_loss_db_per_cm']:.2f} dB/cm`** ⇔ **`Q_int = {m['Q_int']:,.0f}`**（`n_eff = {m['neff_ring']:.4f}`，`n_g = {m['ng_ring']:.4f}`）\n"
+            f"- **自由光谱范围 (`FSR`)**：**`{m['FSR_GHz']:.2f} GHz`**（`{m['FSR_nm']:.3f} nm`）\n"
+            f"- **有载 Q 与耦合状态**：`Q_loaded = {m['Q_loaded']:,.0f}` | `{cc['regime']}`（消光比 `ER = {m['ER_thru_dB']:.1f} dB`）\n"
+            f"- **对应 `{m['alpha_loss_db_per_cm']:.2f} dB/cm` 的临界耦合目标**：**`{cc['parameter']} = {cc['recommended_value']} {cc['unit']}`**"
+        )
+    else:
+        summary = (
+            f"🎯 **Synthesized `{TOPOLOGY_CATALOG[cfg.topology]['name']}`** on **`{cfg.core_material}`** "
+            f"(`H = {cfg.film_height_um*1000:.0f} nm`, `W_ring = {cfg.ring_width_um:.2f} µm`, `R = {cfg.ring_radius_um:.2f} µm`, `{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`):\n"
+            f"- **Propagation Loss & Intrinsic Q**: **`α = {m['alpha_loss_db_per_cm']:.2f} dB/cm`** ⇔ **`Q_int = {m['Q_int']:,.0f}`** (`n_eff = {m['neff_ring']:.4f}`, `n_g = {m['ng_ring']:.4f}`)\n"
+            f"- **Free Spectral Range**: **`{m['FSR_GHz']:.2f} GHz`** (`{m['FSR_nm']:.3f} nm`)\n"
+            f"- **Loaded Q & Coupling**: `Q_loaded = {m['Q_loaded']:,.0f}` | `{cc['regime']}` (`ER = {m['ER_thru_dB']:.1f} dB`)\n"
+            f"- **Critical-Coupling Target (for `{m['alpha_loss_db_per_cm']:.2f} dB/cm`)**: **`{cc['parameter']} = {cc['recommended_value']} {cc['unit']}`**"
+        )
     if mrr_res.get("wavelength_warnings"):
-        summary += "\n\n**Wavelength / Material Compatibility Notice**:\n" + "\n".join(
+        summary += ("\n\n⚠️ **材料与波段兼容性提示**：\n" if zh else "\n\n⚠️ **Material / Wavelength Notice**:\n") + "\n".join(
             f"- {w}" for w in mrr_res["wavelength_warnings"]
         )
-    if use_ollama:
-        compact_kpi = (
-            f"{cfg.topology} {cfg.core_material} H={cfg.film_height_um}um W={cfg.ring_width_um}um "
-            f"R={cfg.ring_radius_um}um gap={cfg.gap_thru_um}um FSR={m['FSR_GHz']:.1f}GHz "
-            f"Q_L={m['Q_loaded']:.0f} ER={m['ER_thru_dB']:.1f}dB {cc['regime']}"
-        )
-        tip = _maybe_ollama_commentary(compact_kpi)
-        if tip:
-            summary += f"\n\n*Local LLM*: {tip}"
 
-    chips = [
-        {"label": f"Apply Critical Coupling ({cc['recommended_value']} {cc['unit']})", "prompt": "Apply critical coupling"},
-        {"label": "Sweep Coupler Gap", "prompt": "Sweep gap"},
-        {"label": "Sweep Pulley Angle" if "pulley" in cfg.topology else "Sweep Waveguide Width", "prompt": "Sweep pulley angle" if "pulley" in cfg.topology else "Sweep width"},
-        {"label": "Create Single .GDS + .LYP", "prompt": "Export single GDS layout"},
-        {"label": "Create 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
-    ]
+    chips = (
+        [
+            {"label": f"⚡ 一键应用临界耦合 ({cc['recommended_value']} {cc['unit']})", "prompt": "临界耦合"},
+            {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
+            {"label": "🗂️ 导出 5 环扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
+            {"label": "📏 扫描耦合间距 Gap", "prompt": "扫描间距"},
+            {"label": "📉 扫描传播损耗 (dB/cm)", "prompt": "扫描损耗"},
+        ]
+        if zh
+        else [
+            {"label": f"⚡ Apply Critical Coupling ({cc['recommended_value']} {cc['unit']})", "prompt": "Apply critical coupling"},
+            {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
+            {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
+            {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap"},
+            {"label": "📉 Sweep Loss (dB/cm)", "prompt": "Sweep propagation loss"},
+        ]
+    )
     session["history"] = (history + [{"role": "assistant", "content": summary}])[-16:]
     return {
         "session": session,
         "assistant_message": summary,
         "chips": chips,
         "mrr_result": mrr_res,
+        "ui_view": "mrr",
+        "wizard_step": 6,
         "active_tab": "tab-mrr",
     }

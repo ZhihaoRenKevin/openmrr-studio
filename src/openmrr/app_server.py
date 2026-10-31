@@ -32,6 +32,7 @@ from .copilot import (
     create_initial_session,
     get_welcome_chips,
     inject_uploaded_gds_into_session,
+    probe_ai_backends,
     process_chat_turn,
 )
 from .eigenmode_solver import (
@@ -64,13 +65,13 @@ from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
     export_mrr_gds,
+    get_default_output_root,
     simulate_mrr_topology,
 )
 from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 from .ui_frontend import HTML_APP_PAGE
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUT_ROOT = Path(os.environ.get("OPENMRR_OUTPUT_DIR", str(REPO_ROOT / "outputs")))
+DEFAULT_OUT_ROOT = get_default_output_root()
 GDS_EXPORT_DIR = DEFAULT_OUT_ROOT / "gds_exports"
 GDS_UPLOAD_DIR = DEFAULT_OUT_ROOT / "gds_uploads"
 
@@ -121,24 +122,42 @@ async def api_material_dispersion(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
-async def api_chat_init(_request: Request) -> JSONResponse:
-    sess = create_initial_session()
+async def api_chat_init(request: Request) -> JSONResponse:
+    lang = request.query_params.get("lang", "en")
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and body.get("lang"):
+            lang = str(body["lang"])
+    except Exception:
+        pass
+    sess = create_initial_session(lang=lang)
     return JSONResponse({
         "session": sess,
         "assistant_message": sess["history"][-1]["content"],
-        "chips": get_welcome_chips(),
+        "chips": get_welcome_chips(lang=lang),
     })
+
+
+async def api_ai_backends(_request: Request) -> JSONResponse:
+    res = await anyio.to_thread.run_sync(probe_ai_backends)
+    return JSONResponse(res)
 
 
 def _chat_turn_sync(payload: dict) -> dict:
     session = payload.get("session")
     message = str(payload.get("message", "")).strip()
     use_ollama = bool(payload.get("use_ollama", False))
+    ai_mode = str(payload.get("ai_mode") or ("ollama" if use_ollama else "offline"))
+    ai_api_key = str(payload.get("ai_api_key") or "").strip() or None
+    lang = payload.get("lang")
     res = process_chat_turn(
         session,
         message,
         gds_export_dir=GDS_EXPORT_DIR,
         use_ollama=use_ollama,
+        ai_mode=ai_mode,
+        ai_api_key=ai_api_key,
+        lang=str(lang) if lang else None,
     )
     if "gds_export" in res:
         gp = Path(res["gds_export"]["gds_path"])
@@ -172,8 +191,9 @@ def _upload_gds_sync(payload: dict) -> dict:
     cell_name = payload.get("cell_name") or None
 
     gds_info = analyze_uploaded_gds(saved_path, core_layer=lyr_tuple, cell_name=cell_name)
-    session = payload.get("session") or create_initial_session()
-    chat_sync = inject_uploaded_gds_into_session(session, gds_info)
+    lang = str(payload.get("lang") or "en")
+    session = payload.get("session") or create_initial_session(lang=lang)
+    chat_sync = inject_uploaded_gds_into_session(session, gds_info, lang=lang)
     return {
         "gds_info": gds_info,
         "session": chat_sync["session"],
@@ -496,20 +516,30 @@ def _fit_spectrum_sync(payload: dict) -> dict:
     tr = np.asarray(payload["transmission"], dtype=float)
     model_type = str(payload.get("model_type", "auto"))
     known_regime = payload.get("known_regime") or None
+    l_rt = float(payload.get("ring_length_um", 250.0))
+    ng_assumed = payload.get("ng_assumed")
+    ng_val = float(ng_assumed) if ng_assumed not in (None, "") else 2.10
 
     if model_type == "multi_fsr":
-        l_rt = float(payload.get("ring_length_um", 250.0))
         multi = fit_multi_resonance_spectrum(wl, tr, ring_length_um=l_rt, known_regime=known_regime)
         return {"mode": "multi_fsr", "result": multi}
 
     summary, y_fit, _ = fit_single_resonance_cmt(
-        wl, tr, model_type=model_type, known_regime=known_regime
+        wl,
+        tr,
+        model_type=model_type,
+        known_regime=known_regime,
+        ng_assumed=ng_val,
+        ring_length_um=l_rt,
     )
+    # Also return normalized linear trace actually fitted (in case input was dB/dBm)
+    tr_norm = 10.0 ** ((tr - float(np.percentile(tr, 95))) / 10.0) if float(np.min(tr)) < -0.25 else tr
     return {
         "mode": "single",
         "summary": summary.to_dict(),
+        "y_measured_linear": np.round(tr_norm, 6).tolist(),
         "y_fit": np.round(y_fit, 6).tolist(),
-        "residuals": np.round(tr - y_fit, 6).tolist(),
+        "residuals": np.round(tr_norm - y_fit, 6).tolist(),
     }
 
 
@@ -526,6 +556,7 @@ def create_app() -> Starlette:
     routes = [
         Route("/", homepage, methods=["GET"]),
         Route("/api/hardware", api_hardware, methods=["GET"]),
+        Route("/api/ai_backends", api_ai_backends, methods=["GET"]),
         Route("/api/benchmark", api_benchmark, methods=["GET"]),
         Route("/api/materials", api_materials, methods=["GET"]),
         Route("/api/material_dispersion", api_material_dispersion, methods=["GET"]),

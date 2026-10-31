@@ -24,6 +24,27 @@ import lmfit
 
 from .materials import C0_M_PER_S
 
+_DB_PER_NEPER = 10.0 / math.log(10.0)  # ~4.342944819 dB
+
+
+def q_int_to_loss_db_per_cm(q_int: float, ng: float, wavelength_nm: float) -> float:
+    """Convert intrinsic quality factor `Q_int` to waveguide power propagation loss `alpha` [dB/cm].
+
+    Exact relation:
+      alpha [1/m] = (2 * pi * n_g) / (Q_int * lambda_0 [m])
+      alpha [dB/cm] = alpha [1/m] * (10 / ln(10)) / 100
+    """
+    wl_m = max(float(wavelength_nm) * 1e-9, 1e-12)
+    alpha_per_m = (2.0 * math.pi * float(ng)) / (max(float(q_int), 1.0) * wl_m)
+    return float(alpha_per_m * _DB_PER_NEPER / 100.0)
+
+
+def loss_db_per_cm_to_q_int(alpha_db_per_cm: float, ng: float, wavelength_nm: float) -> float:
+    """Convert waveguide power propagation loss `alpha` [dB/cm] to intrinsic `Q_int`."""
+    wl_m = max(float(wavelength_nm) * 1e-9, 1e-12)
+    alpha_per_m = max(float(alpha_db_per_cm), 1e-9) * 100.0 / _DB_PER_NEPER
+    return float((2.0 * math.pi * float(ng)) / (alpha_per_m * wl_m))
+
 
 # ==============================================================================
 # 1. Exact Analytical CMT / Transfer-Matrix Forward Models
@@ -214,6 +235,13 @@ class ResonanceFitResult:
     nrmse_pct: float
     aic: float
     bic: float
+    # Extracted waveguide propagation loss [dB/cm] & coupler power coupling (given n_g / L_rt)
+    ng_used: float = 2.10
+    alpha_loss_under_db_per_cm: float = 0.0
+    alpha_loss_over_db_per_cm: float = 0.0
+    alpha_loss_selected_db_per_cm: float | None = None
+    roundtrip_loss_db: float | None = None
+    kappa_power_ext: float | None = None
 
     @property
     def Q_int(self) -> float:
@@ -224,6 +252,14 @@ class ResonanceFitResult:
         return float(self.Q_ext_selected if self.Q_ext_selected is not None else self.Q_ext_under_branch)
 
     @property
+    def alpha_loss_db_per_cm(self) -> float:
+        return float(
+            self.alpha_loss_selected_db_per_cm
+            if self.alpha_loss_selected_db_per_cm is not None
+            else self.alpha_loss_under_db_per_cm
+        )
+
+    @property
     def mu_split_ghz(self) -> float:
         return float(self.mode_splitting_ghz)
 
@@ -231,6 +267,7 @@ class ResonanceFitResult:
         d = asdict(self)
         d["Q_int"] = self.Q_int
         d["Q_ext"] = self.Q_ext
+        d["alpha_loss_db_per_cm"] = round(self.alpha_loss_db_per_cm, 4)
         d["mu_split_ghz"] = self.mu_split_ghz
         return d
 
@@ -245,22 +282,31 @@ def fit_single_resonance_cmt(
     model_type: str = "auto",
     known_regime: str | None = None,
     measured_phase_rad: np.ndarray | None = None,
+    ng_assumed: float | None = None,
+    ring_length_um: float | None = None,
 ) -> tuple[ResonanceFitResult, np.ndarray, lmfit.model.ModelResult]:
     """Fit a single MRR resonance window with rigorous CMT using `lmfit`.
 
     Args:
       wavelength_nm: 1D wavelength vector in nm (raw, unmodified).
-      transmission: 1D linear power transmission (not dB; convert 10**(dB/10) beforehand).
+      transmission: 1D linear power transmission (or dB/dBm if negative, auto-converted).
       model_type: 'lorentzian', 'split_doublet', 'fano', or 'auto' (compares BIC to
                   detect genuine backscattering doublet splitting vs single Lorentzian).
       known_regime: None (intensity-only -> reports both under/over branches honestly!),
                     'under', or 'over'. If `measured_phase_rad` is supplied, regime is
                     determined automatically from the phase swing!
+      ng_assumed: Group index `n_g` used to convert extracted `Q_int` into waveguide
+                  propagation loss `alpha [dB/cm]` (defaults to `2.10` if omitted).
+      ring_length_um: Optional cavity round-trip length `L_rt` [um] to also compute
+                      round-trip loss [dB] and bus-ring power coupling `kappa^2`.
     """
     wl = np.asarray(wavelength_nm, dtype=float).ravel()
     tr = np.asarray(transmission, dtype=float).ravel()
     if len(wl) != len(tr) or len(wl) < 7:
         raise ValueError("Need matching wavelength_nm and transmission vectors with >= 7 points")
+    if float(np.min(tr)) < -0.25:
+        # Auto-convert dB / dBm transmission trace into normalized linear power
+        tr = 10.0 ** ((tr - float(np.percentile(tr, 95))) / 10.0)
 
     # Initial guesses from raw data (without smoothing or altering tr)
     edge_n = max(2, len(tr) // 10)
@@ -422,6 +468,22 @@ def fit_single_resonance_cmt(
     rmse = math.sqrt(ss_res / len(tr))
     nrmse_pct = (rmse / max(float(np.max(tr) - np.min(tr)), 1e-12)) * 100.0
 
+    ng_val = float(ng_assumed) if (ng_assumed is not None and ng_assumed > 0.5) else 2.10
+    loss_under = q_int_to_loss_db_per_cm(q_int_under, ng_val, lam0)
+    loss_over = q_int_to_loss_db_per_cm(q_int_over, ng_val, lam0)
+    loss_sel = q_int_to_loss_db_per_cm(q_int_sel, ng_val, lam0) if q_int_sel is not None else None
+
+    rt_loss_db: float | None = None
+    kp_ext: float | None = None
+    if ring_length_um is not None and ring_length_um > 0:
+        eff_loss = loss_sel if loss_sel is not None else loss_under
+        rt_loss_db = round(eff_loss * (float(ring_length_um) * 1e-4), 5)
+        eff_q_ext = q_ext_sel if q_ext_sel is not None else q_ext_under
+        kp_ext = round(
+            float(1.0 - math.exp(-(2.0 * math.pi * ng_val * (float(ring_length_um) * 1e-6)) / max(eff_q_ext * (lam0 * 1e-9), 1e-18))),
+            6,
+        )
+
     summary = ResonanceFitResult(
         model_type=chosen_name,
         lambda0_nm=lam0,
@@ -443,6 +505,12 @@ def fit_single_resonance_cmt(
         nrmse_pct=nrmse_pct,
         aic=float(res.aic),
         bic=float(res.bic),
+        ng_used=round(ng_val, 5),
+        alpha_loss_under_db_per_cm=round(loss_under, 4),
+        alpha_loss_over_db_per_cm=round(loss_over, 4),
+        alpha_loss_selected_db_per_cm=round(loss_sel, 4) if loss_sel is not None else None,
+        roundtrip_loss_db=rt_loss_db,
+        kappa_power_ext=kp_ext,
     )
     return summary, y_fit, res
 
@@ -457,9 +525,11 @@ def fit_multi_resonance_spectrum(
     known_regime: str | None = None,
     model_type: str = "auto",
 ) -> dict:
-    """Detect and fit multiple resonances across a broadband MRR scan; extract FSR & n_g(lambda)."""
+    """Detect and fit multiple resonances across a broadband MRR scan; extract FSR, n_g & propagation loss [dB/cm]."""
     wl = np.asarray(wavelength_nm, dtype=float).ravel()
     tr = np.asarray(transmission, dtype=float).ravel()
+    if float(np.min(tr)) < -0.25:
+        tr = 10.0 ** ((tr - float(np.percentile(tr, 95))) / 10.0)
     step_nm = float(np.median(np.diff(wl)))
     if step_nm <= 0:
         raise ValueError("wavelength_nm must be strictly ascending")
@@ -484,7 +554,7 @@ def fit_multi_resonance_spectrum(
         if np.count_nonzero(mask) < 9:
             continue
         fit_res, _, _ = fit_single_resonance_cmt(
-            wl[mask], tr[mask], model_type=model_type, known_regime=known_regime
+            wl[mask], tr[mask], model_type=model_type, known_regime=known_regime, ring_length_um=ring_length_um
         )
         fits.append(fit_res.to_dict())
 
@@ -496,7 +566,19 @@ def fit_multi_resonance_spectrum(
     fsr_ghz = (C0_M_PER_S / (l_rt_m * ng_extracted)) * 1e-9 if len(ng_extracted) > 0 else np.array([])
 
     mean_q_loaded = float(np.mean([f["Q_loaded"] for f in fits])) if fits else 0.0
+    mean_q_int = float(np.mean([f["Q_int"] for f in fits])) if fits else 0.0
+    mean_q_int_under = float(np.mean([f["Q_int_under_branch"] for f in fits])) if fits else 0.0
+    mean_q_int_over = float(np.mean([f["Q_int_over_branch"] for f in fits])) if fits else 0.0
     ng_mean_val = float(np.mean(ng_extracted)) if len(ng_extracted) > 0 else None
+
+    # Self-contained propagation loss [dB/cm] using FSR-extracted n_g + fitted Q_int!
+    ng_for_loss = ng_mean_val if ng_mean_val is not None else 2.10
+    lam_mean = float(np.mean(lam_centers)) if len(lam_centers) > 0 else float(np.mean(wl))
+    loss_under = round(q_int_to_loss_db_per_cm(mean_q_int_under, ng_for_loss, lam_mean), 4) if fits else None
+    loss_over = round(q_int_to_loss_db_per_cm(mean_q_int_over, ng_for_loss, lam_mean), 4) if fits else None
+    loss_sel = round(q_int_to_loss_db_per_cm(mean_q_int, ng_for_loss, lam_mean), 4) if fits else None
+    rt_loss = round(loss_sel * (ring_length_um * 1e-4), 5) if loss_sel is not None else None
+
     return {
         "resonance_count": len(fits),
         "num_resonances": len(fits),
@@ -507,6 +589,11 @@ def fit_multi_resonance_spectrum(
         "mean_fsr_nm": float(np.mean(fsr_nm)) if len(fsr_nm) > 0 else 0.0,
         "mean_fsr_ghz": float(np.mean(fsr_ghz)) if len(fsr_ghz) > 0 else 0.0,
         "mean_Q_loaded": mean_q_loaded,
+        "mean_Q_int": mean_q_int,
+        "alpha_loss_db_per_cm": loss_sel,
+        "alpha_loss_under_db_per_cm": loss_under,
+        "alpha_loss_over_db_per_cm": loss_over,
+        "roundtrip_loss_db": rt_loss,
         "ng_extracted_list": ng_extracted.tolist(),
         "ng_extracted": ng_mean_val,
         "ng_mean": ng_mean_val,

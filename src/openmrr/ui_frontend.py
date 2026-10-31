@@ -1,15 +1,14 @@
-"""Self-Contained Zero-CDN Native Desktop & Web UI for `OpenMRR Studio v3.0`.
+"""Clean, Guided Step-by-Step Conversational UI for `OpenMRR Studio v3.1`.
 
-Combines:
-  - Left Dock: Conversational Photonics Design Copilot (English & Chinese guided spec
-    interview, live parameter sweeps, 1-click critical coupling, bidirectional GDS actions)
-  - Right Workbench (5 synchronized tabs):
-      1. MRR Studio & Sweeps (Top-down/cross-section SVGs, broadband spectrum, coupler & sweep plots)
-      2. GDS Upload & Mask Creator (Drag-drop `.gds`/`.oas` -> 2D polygon viewer + geometry extraction
-         + optical simulation; Single-device & MPW Sweep-Array `.gds` + KLayout `.lyp` creator)
-      3. 2D Eigenmode & Single-Mode Width Advisor (Retina `|E|` field heatmap + `n_eff(W)`/`n_g(W)` cutoff)
-      4. Lab Spectrum CMT Fitter (CSV upload, BIC auto-selection: Lorentzian / Split-Doublet / Fano / Multi-FSR)
-      5. 18-Material Optical Library & GPU/AMX/CPU Benchmark
+Designed for clarity and zero visual overload:
+  - Left Panel: Spacious Guided Chatbot asking ONE clear question at a time with clickable cards/chips.
+  - Top Bar: 6-Step Progress Tracker + optional `⚙ Expert Controls` slide-over drawer (hidden by default).
+  - Right Panel: Contextual Live Stage showing ONLY the visual relevant to the current step:
+      1) `overview` — Workflow Entry Cards + Live Design Blueprint & Cross-Section SVG
+      2) `mode`     — 2D Vector Mode |E| Heatmap + Single-Mode Width Cutoff Curve
+      3) `mrr`      — 5 Key KPIs (including Propagation Loss dB/cm <-> Q_int) + Spectrum + Coupler/Sweep Curve
+      4) `gds`      — Interactive 2D GDSII Polygon & Sub-nm Gap Caliper Canvas + Mask Export
+      5) `fit`      — Lab Spectrum CMT Fitter & Propagation Loss (`dB/cm`) Extractor -> 1-Click Design Handoff
 """
 from __future__ import annotations
 
@@ -18,731 +17,823 @@ HTML_APP_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>OpenMRR Studio v3.0 — Conversational Eigenmode, CMT &amp; GDSII Designer</title>
+<title>OpenMRR Studio — Guided Photonics Microring Designer</title>
 <style>
 :root {
-  --bg-app: #090e1a;
-  --bg-panel: #101829;
-  --bg-card: #162138;
-  --bg-input: #0c1322;
-  --border: #253555;
-  --border-hi: #38bdf8;
-  --text-main: #e8eef8;
-  --text-muted: #93a5c4;
-  --accent: #38bdf8;
-  --accent-2: #fb923c;
-  --accent-3: #34d399;
+  --bg-app: #0b101b;
+  --bg-panel: #111827;
+  --bg-card: #162033;
+  --bg-card-hover: #1d2a44;
+  --bg-input: #0d1424;
+  --border: #24324b;
+  --border-accent: #38bdf8;
+  --text-main: #f1f5f9;
+  --text-sub: #cbd5e1;
+  --text-muted: #8b9dc3;
+  --cyan: #38bdf8;
+  --blue: #2563eb;
+  --green: #34d399;
+  --amber: #fb923c;
+  --red: #f87171;
   --purple: #a78bfa;
-  --danger: #f87171;
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-  --font-mono: "SF Mono", "Consolas", "Menlo", monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: var(--font-ui);
   background: var(--bg-app);
   color: var(--text-main);
-  font-size: 12.5px;
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
-/* Header */
+
+/* ==================== TOP HEADER & STEP PROGRESS ==================== */
 header {
-  height: 48px;
-  background: linear-gradient(90deg, #0c1425 0%, #13213c 100%);
+  height: 58px;
+  background: #0d1424;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 20px;
+  gap: 16px;
   flex-shrink: 0;
 }
-.brand { display: flex; align-items: center; gap: 9px; }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand-logo {
-  width: 27px; height: 27px; border-radius: 7px;
-  background: radial-gradient(circle at 30% 30%, #38bdf8, #1d4ed8);
+  width: 32px; height: 32px; border-radius: 9px;
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
   display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 13px; color: #fff;
-  box-shadow: 0 0 12px rgba(56,189,248,0.35);
+  font-weight: 800; font-size: 15px; color: #fff;
+  box-shadow: 0 2px 10px rgba(14,165,233,0.35);
 }
-.brand-title { font-weight: 700; font-size: 14.5px; letter-spacing: 0.2px; }
-.brand-sub { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
-.nav-tabs { display: flex; gap: 5px; flex-wrap: nowrap; }
-.tab-btn {
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid transparent;
-  padding: 5px 11px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.14s;
+.brand-title { font-size: 15.5px; font-weight: 700; letter-spacing: 0.2px; }
+.hw-pill {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.35);
+  color: var(--green); font-family: var(--font-mono);
 }
-.tab-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.04); }
-.tab-btn.active {
-  color: #fff;
+
+.stepper {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(22,32,51,0.75); padding: 5px 10px;
+  border-radius: 999px; border: 1px solid var(--border);
+}
+.step-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-muted);
+  padding: 4px 10px; border-radius: 999px;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.step-num {
+  width: 19px; height: 19px; border-radius: 50%;
+  background: #1e293b; color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.step-item.active {
   background: rgba(56,189,248,0.16);
-  border-color: rgba(56,189,248,0.55);
+  color: #fff; font-weight: 600;
 }
-.status-badges { display: flex; align-items: center; gap: 7px; }
-.badge {
-  font-size: 10.5px;
-  font-family: var(--font-mono);
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-  color: var(--accent);
-}
-.badge.green { color: var(--accent-3); border-color: rgba(52,211,153,0.4); }
+.step-item.active .step-num { background: var(--cyan); color: #08101d; }
+.step-item.done { color: #a7f3d0; }
+.step-item.done .step-num { background: rgba(52,211,153,0.25); color: var(--green); }
+.step-sep { color: #334155; font-size: 11px; }
 
-/* Main Split Shell: Left Copilot + Right Workbench */
-.app-shell {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.lang-switch {
+  display: inline-flex; align-items: center;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 2px; gap: 2px;
+}
+.lang-btn {
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 11.5px; font-weight: 700; padding: 4px 9px;
+  border-radius: 6px; cursor: pointer; transition: all 0.14s ease;
+}
+.lang-btn:hover { color: var(--text-main); }
+.lang-btn.active { background: var(--cyan); color: #07101e; }
+
+/* ==================== BUTTONS ==================== */
+.btn {
+  padding: 7px 13px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-main); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none;
+}
+.btn:hover { background: var(--bg-card-hover); border-color: #475569; }
+.btn.primary { background: #0284c7; border-color: #38bdf8; color: #fff; }
+.btn.primary:hover { background: #0369a1; }
+.btn.green { background: #059669; border-color: #34d399; color: #fff; }
+.btn.green:hover { background: #047857; }
+.btn.amber { background: #d97706; border-color: #fb923c; color: #fff; }
+.btn.subtle { background: transparent; color: var(--text-sub); }
+.btn.sm { padding: 5px 10px; font-size: 11.5px; border-radius: 7px; }
+
+/* ==================== MAIN TWO-COLUMN STUDIO ==================== */
+.studio-body {
+  flex: 1; display: flex; overflow: hidden;
 }
 
-/* Left Conversational Copilot Dock */
-.copilot-dock {
-  width: 390px;
-  min-width: 320px;
-  max-width: 460px;
+/* LEFT: GUIDED CHATBOT ASSISTANT */
+.chat-col {
+  width: 45%; min-width: 430px; max-width: 640px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  transition: margin-left 0.2s ease;
+  display: flex; flex-direction: column;
 }
-.copilot-dock.collapsed {
-  display: none;
+.chat-scroll {
+  flex: 1; overflow-y: auto;
+  padding: 22px 24px 14px 24px;
+  display: flex; flex-direction: column; gap: 16px;
 }
-.copilot-header {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: rgba(22,33,56,0.65);
-}
-.copilot-title {
-  font-weight: 700;
-  font-size: 12.5px;
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dot-live {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent-3);
-  box-shadow: 0 0 8px var(--accent-3);
-}
-.copilot-actions { display: flex; align-items: center; gap: 6px; }
-.mini-btn {
-  background: var(--bg-input);
-  color: var(--text-main);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 3px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.mini-btn:hover { border-color: var(--accent); color: #fff; }
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.msg {
-  max-width: 94%;
-  padding: 9px 11px;
-  border-radius: 9px;
-  line-height: 1.48;
-  font-size: 12.2px;
-  word-wrap: break-word;
-}
-.msg.assistant {
-  align-self: flex-start;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-main);
-}
-.msg.user {
-  align-self: flex-end;
-  background: linear-gradient(135deg, #0284c7, #1d4ed8);
-  color: #fff;
-  border: 1px solid rgba(56,189,248,0.4);
-}
-.msg code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: rgba(9,14,26,0.65);
-  padding: 1px 4px;
-  border-radius: 4px;
-  color: #7dd3fc;
-}
-.msg ul { margin: 5px 0 3px 16px; }
-.msg li { margin-bottom: 3px; }
-.chip-tray {
-  padding: 7px 10px;
-  border-top: 1px solid rgba(37,53,85,0.65);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  max-height: 92px;
-  overflow-y: auto;
-  background: rgba(12,19,34,0.65);
-}
-.chip {
-  background: rgba(56,189,248,0.10);
-  color: #bae6fd;
-  border: 1px solid rgba(56,189,248,0.35);
-  border-radius: 999px;
-  padding: 4px 9px;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-.chip:hover {
-  background: rgba(56,189,248,0.24);
-  color: #fff;
-  border-color: var(--accent);
-}
-.chat-composer {
-  padding: 9px 10px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 6px;
-  background: var(--bg-panel);
-}
-.chat-composer input {
-  flex: 1;
-  background: var(--bg-input);
-  color: var(--text-main);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 12px;
-}
-.chat-composer input:focus { outline: none; border-color: var(--accent); }
-.send-btn {
-  background: linear-gradient(135deg, #0284c7, #2563eb);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 0 13px;
-  font-weight: 700;
-  font-size: 12px;
-  cursor: pointer;
-}
-.send-btn:disabled { opacity: 0.5; cursor: wait; }
+.msg-row { display: flex; gap: 12px; align-items: flex-start; animation: fadeIn 0.18s ease; }
+.msg-row.user { flex-direction: row-reverse; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* Right Visual Workbench */
-.workbench {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.avatar {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
 }
-.tab-pane {
-  display: none;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-  gap: 11px;
-  flex-direction: column;
-}
-.tab-pane.active { display: flex; }
+.msg-row.assistant .avatar { background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; }
+.msg-row.user .avatar { background: #1e293b; color: #94a3b8; border: 1px solid var(--border); }
 
-/* Reusable Cards, Grids & Controls */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
+.bubble {
+  max-width: 88%; padding: 13px 16px; border-radius: 13px;
+  font-size: 13.8px; line-height: 1.62;
 }
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.msg-row.assistant .bubble {
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-main);
+  border-top-left-radius: 4px;
 }
-.card-title {
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--accent);
+.msg-row.user .bubble {
+  background: #1d4ed8; color: #fff; border-top-right-radius: 4px;
 }
-.kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
+.bubble p + p { margin-top: 8px; }
+.bubble ul { margin: 8px 0 4px 18px; }
+.bubble li { margin-bottom: 4px; }
+.bubble code {
+  background: rgba(8,13,24,0.75); padding: 1.5px 6px; border-radius: 5px;
+  font-family: var(--font-mono); font-size: 12.2px; color: #7dd3fc;
 }
-.kpi-box {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 8px 10px;
-}
-.kpi-label { font-size: 10.5px; color: var(--text-muted); }
-.kpi-val {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  margin-top: 2px;
-}
-.kpi-sub { font-size: 10.5px; color: var(--accent-3); margin-top: 1px; }
+.msg-row.user .bubble code { background: rgba(255,255,255,0.18); color: #fff; }
 
-.param-grid {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 7px 8px;
+/* GUIDED CHOICE CHIPS */
+.guided-choices-wrap {
+  padding: 10px 24px 12px 24px;
+  border-top: 1px solid rgba(36,50,75,0.65);
+  background: rgba(13,20,36,0.55);
 }
-.field { display: flex; flex-direction: column; gap: 3px; }
-.field label { font-size: 10.5px; color: var(--text-muted); }
-.field input, .field select {
-  background: var(--bg-input);
-  color: var(--text-main);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 4px 6px;
-  font-size: 11.5px;
-  font-family: var(--font-mono);
+.choices-caption {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-muted); margin-bottom: 8px; font-weight: 600;
 }
-.field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
-
-.btn-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-.btn {
-  background: var(--bg-input);
-  color: var(--text-main);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 11px;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.chips-grid {
+  display: flex; flex-wrap: wrap; gap: 7px;
 }
-.btn:hover { border-color: var(--accent); color: #fff; }
-.btn.primary {
-  background: linear-gradient(135deg, #0284c7, #2563eb);
-  border-color: rgba(56,189,248,0.5);
-  color: #fff;
-}
-.btn.amber {
-  background: rgba(251,146,60,0.16);
-  border-color: rgba(251,146,60,0.55);
-  color: #fed7aa;
-}
-.btn.green {
-  background: rgba(52,211,153,0.15);
-  border-color: rgba(52,211,153,0.5);
-  color: #a7f3d0;
-}
-
-.two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.split-35-65 {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 10px;
-}
-canvas.plot-canvas {
-  width: 100%;
-  height: 235px;
-  background: #080d18;
-  border: 1px solid #1e2c49;
-  border-radius: 6px;
-  display: block;
-}
-canvas.gds-canvas {
-  width: 100%;
-  height: 360px;
-  background: #060a12;
-  border: 1px solid #223252;
-  border-radius: 6px;
-  cursor: grab;
-  display: block;
-}
-canvas.gds-canvas:active { cursor: grabbing; }
-.dropzone {
-  border: 1.5px dashed rgba(56,189,248,0.45);
-  background: rgba(12,19,34,0.65);
-  border-radius: 7px;
-  padding: 13px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.dropzone:hover { border-color: var(--accent); background: rgba(56,189,248,0.08); }
-table.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11.5px;
-  font-family: var(--font-mono);
-}
-table.data-table th, table.data-table td {
-  padding: 5px 7px;
-  border-bottom: 1px solid rgba(37,53,85,0.6);
+.chip-btn {
+  padding: 8px 13px; border-radius: 10px;
+  background: #17233a; border: 1px solid #2b3e63;
+  color: #e2e8f0; font-size: 12.8px; font-weight: 500;
+  cursor: pointer; transition: all 0.14s ease;
   text-align: left;
 }
-table.data-table th { color: var(--accent); font-weight: 600; }
-details summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--accent);
-  font-size: 11.5px;
-  user-select: none;
+.chip-btn:hover {
+  background: #1e3354; border-color: var(--cyan); color: #fff;
+  transform: translateY(-1px);
+}
+
+/* CHAT COMPOSER */
+.chat-composer {
+  padding: 12px 20px 16px 20px;
+  background: #0d1424; border-top: 1px solid var(--border);
+}
+.composer-tools {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; gap: 8px;
+}
+.composer-left-tools { display: flex; gap: 6px; }
+.composer-box { display: flex; gap: 8px; align-items: center; }
+.composer-box input {
+  flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text-main); border-radius: 10px; padding: 11px 14px;
+  font-size: 13.5px; outline: none; transition: border-color 0.15s;
+}
+.composer-box input:focus { border-color: var(--cyan); }
+
+/* ==================== RIGHT: CONTEXTUAL LIVE STAGE ==================== */
+.stage-col {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-app);
+}
+.stage-topbar {
+  height: 46px; padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(17,24,39,0.65); flex-shrink: 0;
+}
+.stage-pills { display: flex; gap: 5px; }
+.stage-pill {
+  padding: 5px 12px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--text-muted);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.stage-pill:hover { color: var(--text-main); background: rgba(255,255,255,0.04); }
+.stage-pill.active {
+  background: var(--bg-card); border-color: var(--border); color: var(--cyan);
+}
+.stage-status { font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.stage-content {
+  flex: 1; overflow-y: auto; padding: 22px;
+}
+.stage-view { display: none; flex-direction: column; gap: 16px; max-width: 1040px; margin: 0 auto; }
+.stage-view.active { display: flex; }
+
+/* CARDS & GRIDS */
+.card {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px;
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.card-title { font-size: 13.5px; font-weight: 700; color: #e2e8f0; }
+.card-sub { font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono); }
+
+/* WORKFLOW ENTRY CARDS (STAGE 1) */
+.workflow-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+.wf-card {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; cursor: pointer;
+  transition: all 0.16s ease; display: flex; flex-direction: column; gap: 8px;
+}
+.wf-card:hover { border-color: var(--cyan); background: var(--bg-card); transform: translateY(-2px); }
+.wf-icon { font-size: 22px; }
+.wf-title { font-size: 13.5px; font-weight: 700; color: #fff; }
+.wf-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* LIVE BLUEPRINT SPEC GRID */
+.blueprint-grid {
+  display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; align-items: center;
+}
+.spec-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.spec-box {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 9px; padding: 10px 12px;
+}
+.spec-lbl { font-size: 10.5px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.4px; }
+.spec-val { font-size: 13.5px; font-weight: 700; color: var(--cyan); margin-top: 3px; font-family: var(--font-mono); }
+
+/* KPI STRIP */
+.kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.kpi-row.four { grid-template-columns: repeat(4, 1fr); }
+.kpi-card {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 13px;
+}
+.kpi-lbl { font-size: 10.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+.kpi-val { font-size: 16.5px; font-weight: 800; color: #fff; font-family: var(--font-mono); margin-top: 4px; }
+.kpi-val.cyan { color: var(--cyan); }
+.kpi-val.green { color: var(--green); }
+.kpi-val.amber { color: var(--amber); }
+.kpi-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: var(--font-mono); }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+canvas.plot-cv { width: 100%; height: 250px; border-radius: 8px; background: #070b14; display: block; }
+canvas.plot-cv.tall { height: 300px; }
+
+.warn-banner {
+  display: none; padding: 10px 14px; border-radius: 9px;
+  background: rgba(245,158,11,0.14); border: 1px solid rgba(251,146,60,0.5);
+  color: #fed7aa; font-size: 12.2px; line-height: 1.45;
+}
+
+/* ACTION BAR */
+.action-bar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 14px; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+
+/* FORM INPUTS (USED IN FITTER & EXPERT DRAWER) */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.field input, .field select {
+  background: var(--bg-input); border: 1px solid var(--border);
+  color: var(--text-main); border-radius: 7px; padding: 6px 9px;
+  font-size: 12.2px; font-family: var(--font-mono); outline: none;
+}
+.field input:focus, .field select:focus { border-color: var(--cyan); }
+
+/* TABLE */
+table.clean-tbl { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--font-mono); }
+table.clean-tbl th, table.clean-tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+table.clean-tbl th { color: var(--text-muted); font-size: 11px; }
+table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
+
+/* ==================== EXPERT DRAWER (HIDDEN BY DEFAULT!) ==================== */
+.drawer-backdrop {
+  display: none; position: fixed; inset: 0;
+  background: rgba(4,8,16,0.65); z-index: 90;
+}
+.drawer-backdrop.open { display: block; }
+.expert-drawer {
+  position: fixed; top: 0; right: -560px; width: 540px; max-width: 94vw; height: 100vh;
+  background: var(--bg-panel); border-left: 1px solid var(--border);
+  z-index: 100; transition: right 0.22s ease;
+  display: flex; flex-direction: column;
+  box-shadow: -12px 0 40px rgba(0,0,0,0.55);
+}
+.expert-drawer.open { right: 0; }
+.drawer-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.drawer-body {
+  flex: 1; overflow-y: auto; padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.expert-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+
+@media (max-width: 1100px) {
+  .stepper { display: none; }
+  .workflow-grid, .two-col, .blueprint-grid { grid-template-columns: 1fr; }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
 <body>
 
+<!-- ==================== TOP HEADER ==================== -->
 <header>
   <div class="brand">
-    <button class="mini-btn" onclick="toggleCopilot()" title="Show/Hide AI Copilot">💬 Copilot</button>
-    <div class="brand-logo">Φ</div>
+    <div class="brand-logo">M</div>
     <div>
-      <span class="brand-title">OpenMRR Studio</span>
-      <span class="brand-sub">v3.0 · License-Free Eigenmode, CMT &amp; Bidirectional GDSII Suite</span>
+      <div class="brand-title">OpenMRR Studio</div>
     </div>
+    <span class="hw-pill" id="hw-badge">Detecting...</span>
   </div>
-  <div class="nav-tabs">
-    <button class="tab-btn active" data-tab="tab-mrr" onclick="switchTab('tab-mrr')">1. MRR Studio &amp; Sweeps</button>
-    <button class="tab-btn" data-tab="tab-gds" onclick="switchTab('tab-gds')">2. GDS Upload &amp; Mask Creator</button>
-    <button class="tab-btn" data-tab="tab-mode" onclick="switchTab('tab-mode')">3. 2D Eigenmode &amp; Width Advisor</button>
-    <button class="tab-btn" data-tab="tab-fit" onclick="switchTab('tab-fit')">4. Lab Spectrum CMT Fitter</button>
-    <button class="tab-btn" data-tab="tab-mat" onclick="switchTab('tab-mat')">5. 24-Material &amp; GPU/CPU</button>
+
+  <!-- 6-Step Guided Progress Bar -->
+  <div class="stepper" id="wizard-stepper">
+    <div class="step-item active" data-step="1"><span class="step-num">1</span><span data-i18n="step1">Goal</span></div>
+    <span class="step-sep">›</span>
+    <div class="step-item" data-step="2"><span class="step-num">2</span><span data-i18n="step2">Waveband</span></div>
+    <span class="step-sep">›</span>
+    <div class="step-item" data-step="3"><span class="step-num">3</span><span data-i18n="step3">Material</span></div>
+    <span class="step-sep">›</span>
+    <div class="step-item" data-step="4"><span class="step-num">4</span><span data-i18n="step4">Stack &amp; Mode</span></div>
+    <span class="step-sep">›</span>
+    <div class="step-item" data-step="5"><span class="step-num">5</span><span data-i18n="step5">Loss &amp; Ring</span></div>
+    <span class="step-sep">›</span>
+    <div class="step-item" data-step="6"><span class="step-num">6</span><span data-i18n="step6">Optimize &amp; GDS</span></div>
   </div>
-  <div class="status-badges">
-    <span class="badge green" id="hw-badge">Probing Compute...</span>
-    <span class="badge">BSD/MIT Clean</span>
+
+  <div class="header-actions">
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button class="lang-btn active" id="lang-en" onclick="setLanguage('en')">EN</button>
+      <button class="lang-btn" id="lang-zh" onclick="setLanguage('zh')">中文</button>
+    </div>
+    <button class="btn subtle sm" onclick="sendChatPrompt('reset')" data-i18n="btn_reset">↻ Start Over</button>
+    <button class="btn sm" onclick="toggleExpertDrawer(true)" data-i18n="btn_expert">⚙ Expert Controls</button>
   </div>
 </header>
 
-<div class="app-shell">
-  <!-- ================= LEFT DOCK: CONVERSATIONAL PHOTONICS COPILOT ================= -->
-  <aside class="copilot-dock" id="copilot-dock">
-    <div class="copilot-header">
-      <div class="copilot-title"><span class="dot-live"></span> Photonics Design Copilot</div>
-      <div class="copilot-actions">
-        <label style="font-size:10.5px;color:var(--text-muted);display:flex;align-items:center;gap:3px;" title="Optional commentary from local Ollama (127.0.0.1:11434) if running">
-          <input type="checkbox" id="chk-ollama"/> Ollama
-        </label>
-        <button class="mini-btn" onclick="document.getElementById('chat-gds-input').click()">+ .GDS</button>
-        <input type="file" id="chat-gds-input" accept=".gds,.oas" style="display:none" onchange="handleGdsFileSelect(this.files[0])"/>
-        <button class="mini-btn" onclick="sendChatPrompt('reset')">Reset</button>
-      </div>
+<!-- ==================== MAIN STUDIO ==================== -->
+<div class="studio-body">
+
+  <!-- LEFT: GUIDED CONVERSATIONAL ASSISTANT -->
+  <section class="chat-col">
+    <div class="chat-scroll" id="chat-messages"></div>
+
+    <div class="guided-choices-wrap">
+      <div class="choices-caption" data-i18n="choices_caption">Suggested Next Step (Click or type below)</div>
+      <div class="chips-grid" id="chat-chips"></div>
     </div>
-    <div class="chat-messages" id="chat-messages"></div>
-    <div class="chip-tray" id="chip-tray"></div>
+
     <div class="chat-composer">
-      <input type="text" id="chat-input" placeholder="Ask e.g. '400nm Si3N4 pulley MRR, FSR 150 GHz' or '扫间距'..." onkeydown="if(event.key==='Enter') sendUserChat()"/>
-      <button class="send-btn" id="chat-send-btn" onclick="sendUserChat()">Send</button>
+      <div class="composer-tools">
+        <div class="composer-left-tools">
+          <button class="btn sm" onclick="document.getElementById('gds-file-input').click()" data-i18n="btn_up_gds_short">📐 Upload .GDS</button>
+          <button class="btn sm" onclick="openSpectrumFitterDirect()" data-i18n="btn_ext_loss_short">📈 Extract Loss (.CSV)</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <select id="ai-mode-select" onchange="onAiModeChange()" style="width:auto;padding:4px 8px;font-size:11px;border-radius:7px;">
+            <option value="offline" data-i18n="ai_opt_offline">⚡ Offline · Built-in Copilot</option>
+            <option value="ollama" data-i18n="ai_opt_ollama">🖥 Offline · Local Ollama / MLX</option>
+            <option value="claude" data-i18n="ai_opt_claude">🟣 Online · Claude (CLI / API)</option>
+            <option value="codex" data-i18n="ai_opt_codex">🟢 Online · Codex / OpenAI (CLI / API)</option>
+          </select>
+          <span id="ai-mode-badge" style="font-size:10px;color:#34d399;display:none;white-space:nowrap;"></span>
+          <button class="btn sm subtle" id="btn-ai-key" style="display:none;padding:3px 7px;font-size:10.5px;" onclick="toggleAiKeyBox()">🔑 Key</button>
+        </div>
+      </div>
+      <div id="ai-key-bar" style="display:none;margin-bottom:7px;padding:6px 8px;background:rgba(15,23,42,0.85);border:1px solid var(--border);border-radius:8px;font-size:11px;">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="ai-api-key-input" type="password" placeholder="Optional API Key (kept in memory only; leave blank if claude/codex CLI is signed in)" oninput="saveSessionApiKey(this.value)" style="flex:1;padding:5px 8px;font-size:11px;"/>
+          <button class="btn sm subtle" onclick="toggleAiKeyBox()">OK</button>
+        </div>
+      </div>
+      <div class="composer-box">
+        <input id="chat-input" type="text" data-i18n-placeholder="chat_placeholder" placeholder="Type an answer or spec (e.g. 'loss = 0.8 dB/cm, FSR 150 GHz, pulley')..." onkeydown="if(event.key==='Enter') sendUserChat()"/>
+        <button class="btn primary" id="chat-send-btn" onclick="sendUserChat()" data-i18n="btn_send">Send →</button>
+      </div>
     </div>
-  </aside>
+  </section>
 
-  <!-- ================= RIGHT VISUAL WORKBENCH ================= -->
-  <main class="workbench">
+  <!-- RIGHT: CLEAN CONTEXTUAL LIVE STAGE -->
+  <main class="stage-col">
+    <div class="stage-topbar">
+      <div class="stage-pills">
+        <button class="stage-pill active" id="pill-overview" onclick="setStageView('overview')" data-i18n="pill_overview">📋 Blueprint</button>
+        <button class="stage-pill" id="pill-mode" onclick="setStageView('mode')" data-i18n="pill_mode">🔬 2D Mode</button>
+        <button class="stage-pill" id="pill-mrr" onclick="setStageView('mrr')" data-i18n="pill_mrr">📊 Ring Spectrum</button>
+        <button class="stage-pill" id="pill-gds" onclick="setStageView('gds')" data-i18n="pill_gds">📐 GDS Mask</button>
+        <button class="stage-pill" id="pill-fit" onclick="setStageView('fit')" data-i18n="pill_fit">📈 Loss &amp; Q Fit</button>
+      </div>
+      <span class="stage-status" id="spec-status" data-i18n="status_ready">Ready · 400 nm – 14 µm</span>
+    </div>
 
-    <!-- TAB 1: MRR STUDIO & PARAMETER SWEEPS -->
-    <section class="tab-pane active" id="tab-mrr">
-      <div class="kpi-strip">
-        <div class="kpi-box"><div class="kpi-label">Free Spectral Range</div><div class="kpi-val" id="kpi-fsr">-- GHz</div><div class="kpi-sub" id="kpi-fsr-nm">-- nm</div></div>
-        <div class="kpi-box"><div class="kpi-label">Loaded Q (Q_L)</div><div class="kpi-val" id="kpi-ql">--</div><div class="kpi-sub" id="kpi-fwhm">FWHM -- pm</div></div>
-        <div class="kpi-box"><div class="kpi-label">Intrinsic / Ext Q</div><div class="kpi-val" id="kpi-qint">--</div><div class="kpi-sub" id="kpi-qext">Q_ext --</div></div>
-        <div class="kpi-box"><div class="kpi-label">Extinction Ratio</div><div class="kpi-val" id="kpi-er">-- dB</div><div class="kpi-sub" id="kpi-regime">--</div></div>
-        <div class="kpi-box"><div class="kpi-label">Critical-Coupling Target</div><div class="kpi-val" id="kpi-cc">--</div><div class="kpi-sub">1-click synthesis</div></div>
-        <div class="kpi-box"><div class="kpi-label">EO / TO Shift</div><div class="kpi-val" id="kpi-shift">0.0 pm</div><div class="kpi-sub" id="kpi-eo-eff">n_eff / n_g</div></div>
+    <div class="stage-content">
+
+      <!-- ==================== STAGE 1: OVERVIEW & LIVE BLUEPRINT ==================== -->
+      <div class="stage-view active" id="view-overview">
+        <div class="workflow-grid">
+          <div class="wf-card" onclick="sendChatPrompt(currentLang==='zh'?'开始逐步设计微环':'Start step-by-step microring design')">
+            <div class="wf-icon">✨</div>
+            <div class="wf-title" data-i18n="wf1_title">1. Design a New Ring Step-by-Step</div>
+            <div class="wf-desc" data-i18n-html="wf1_desc">Answer one simple question at a time — waveband, material, wafer stack, propagation loss (<code>dB/cm</code>), and target FSR.</div>
+          </div>
+          <div class="wf-card" onclick="openSpectrumFitterDirect()">
+            <div class="wf-icon">📈</div>
+            <div class="wf-title" data-i18n-html="wf2_title">2. Extract Loss (<code>dB/cm</code>) from Spectrum</div>
+            <div class="wf-desc" data-i18n-html="wf2_desc">Upload your measured <code>.CSV</code> trace (linear or <code>dB</code>) to fit <code>Q_int</code>, propagation loss <code>α [dB/cm]</code>, mode splitting &amp; <code>n_g</code>.</div>
+          </div>
+          <div class="wf-card" onclick="document.getElementById('gds-file-input').click()">
+            <div class="wf-icon">📐</div>
+            <div class="wf-title" data-i18n-html="wf3_title">3. Upload &amp; Analyze a <code>.GDS</code> Mask</div>
+            <div class="wf-desc" data-i18n-html="wf3_desc">Inspect existing <code>.GDS</code> / <code>.OAS</code> layouts with automatic polygon gap calipers and simulate their optical spectrum.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="bp_card_title">Live Design Blueprint (Updates as You Chat)</span>
+            <span class="card-sub" id="bp-stage-badge" data-i18n="bp_badge">Guided Setup</span>
+          </div>
+          <div class="blueprint-grid">
+            <div class="spec-list">
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_wl">Wavelength &amp; Pol</div><div class="spec-val" id="bp-wl">1550 nm · TE0</div></div>
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_mat">Core Platform</div><div class="spec-val" id="bp-mat">Si3N4</div></div>
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_stack">Wafer Stack</div><div class="spec-val" id="bp-stack">H=400 nm, Strip</div></div>
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_loss">Propagation Loss α</div><div class="spec-val" id="bp-loss">Foundry Default</div></div>
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_top">Topology</div><div class="spec-val" id="bp-top">Point Circular</div></div>
+              <div class="spec-box"><div class="spec-lbl" data-i18n="bp_lbl_geom">Radius &amp; Gap</div><div class="spec-val" id="bp-geom">R=40 µm · g=250 nm</div></div>
+            </div>
+            <div id="svg-xsec-overview" style="display:flex;justify-content:center;"></div>
+          </div>
+        </div>
       </div>
 
-      <div class="card">
-        <details open>
-          <summary>Manual Wafer Stack, Waveband (Visible / 1310 / 1550 / Mid-IR) &amp; Resonator Controls (Live-Synced)</summary>
-          <div class="param-grid" style="margin-top:9px;">
-            <div class="field" style="grid-column: span 2;"><label>Topology</label><select id="cfg-topology"></select></div>
-            <div class="field"><label>Core Material</label><select id="cfg-material"></select></div>
-            <div class="field"><label>Bottom Clad / Sub</label>
-              <select id="cfg-clad">
-                <option value="SiO2">SiO2 (BOX &le;3.6 um)</option>
-                <option value="CaF2">CaF2 (Mid-IR &le;9.5 um)</option>
-                <option value="MgF2">MgF2 (Mid-IR &le;7.5 um)</option>
-                <option value="Al2O3">Al2O3 / Sapphire (&le;5.5 um)</option>
-                <option value="Si">Si (for Ge-on-Si MIR)</option>
-                <option value="Air">Air / Suspended</option>
-              </select>
-            </div>
-            <div class="field"><label>Top Cladding</label>
-              <select id="cfg-topclad">
-                <option value="SiO2">SiO2</option>
-                <option value="Air">Air</option>
-                <option value="CaF2">CaF2</option>
-                <option value="MgF2">MgF2</option>
-                <option value="Al2O3">Al2O3</option>
-              </select>
-            </div>
-            <div class="field"><label>Polarization</label><select id="cfg-pol"><option value="TE0">TE0</option><option value="TM0">TM0</option></select></div>
-            <div class="field"><label>Waveband Preset</label>
-              <select id="cfg-band" onchange="applyWavebandPresetUI(this.value)">
-                <option value="custom">Custom Wavelength</option>
-                <option value="532">Visible 532 nm</option>
-                <option value="633">Visible 633 nm</option>
-                <option value="780">VNIR / Quantum 780 nm</option>
-                <option value="1310">O-Band 1310 nm</option>
-                <option value="1550" selected>C-Band 1550 nm</option>
-                <option value="2000">SWIR 2000 nm</option>
-                <option value="3800">Mid-IR 3800 nm</option>
-                <option value="4200">Mid-IR 4200 nm (CO2)</option>
-                <option value="7500">LWIR 7500 nm (Ge/Si)</option>
-              </select>
-            </div>
-            <div class="field"><label>Wavelength [nm]</label><input type="number" id="cfg-wl" value="1550" min="350" max="14000" step="1"/></div>
+      <!-- ==================== STAGE 2: 2D EIGENMODE & WIDTH CUTOFF ==================== -->
+      <div class="stage-view" id="view-mode">
+        <div class="kpi-row four">
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mode_lbl_sm">Single-Mode Max Width</div>
+            <div class="kpi-val green" id="mode-kpi-sm">--</div>
+            <div class="kpi-sub">TE1 / TM1 Cutoff</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mode_lbl_wbus">Recommended Bus W</div>
+            <div class="kpi-val cyan" id="mode-kpi-wbus">--</div>
+            <div class="kpi-sub">Strictly Single-Mode</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mode_lbl_wring">Recommended Ring W</div>
+            <div class="kpi-val" id="mode-kpi-wring">--</div>
+            <div class="kpi-sub">Low Sidewall Loss</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mode_lbl_neff">Fundamental Mode</div>
+            <div class="kpi-val amber" id="mode-kpi-neff">--</div>
+            <div class="kpi-sub" id="mode-kpi-ng">n_g = --</div>
+          </div>
+        </div>
 
-            <div class="field"><label>H_film [um]</label><input type="number" id="cfg-hfilm" value="0.40" step="0.02"/></div>
-            <div class="field"><label>H_slab [um]</label><input type="number" id="cfg-hslab" value="0.00" step="0.02"/></div>
-            <div class="field"><label>Sidewall [deg]</label><input type="number" id="cfg-sw" value="85" step="1"/></div>
-            <div class="field"><label>W_ring [um]</label><input type="number" id="cfg-wring" value="1.20" step="0.05"/></div>
-            <div class="field"><label>W_bus [um]</label><input type="number" id="cfg-wbus" value="1.00" step="0.05"/></div>
-            <div class="field"><label>Radius R1 [um]</label><input type="number" id="cfg-r1" value="40.0" step="2.0"/></div>
-            <div class="field"><label>Gap_thru [um]</label><input type="number" id="cfg-gap" value="0.25" step="0.01"/></div>
-            <div class="field"><label>L_s [um] (Racetrack)</label><input type="number" id="cfg-ls" value="12.0" step="1.0"/></div>
-
-            <div class="field"><label>theta_pulley [deg]</label><input type="number" id="cfg-theta" value="25.0" step="2.0"/></div>
-            <div class="field"><label>Loss [dB/cm]</label><input type="number" id="cfg-loss" placeholder="Auto" step="0.1"/></div>
-            <div class="field"><label>Delta_T [K]</label><input type="number" id="cfg-dt" value="0.0" step="5.0"/></div>
-            <div class="field"><label>Voltage [V]</label><input type="number" id="cfg-volt" value="0.0" step="2.0"/></div>
-            <div class="field"><label>R2 [um] (Vernier)</label><input type="number" id="cfg-r2" value="42.5" step="0.5"/></div>
-            <div class="field"><label>Span [nm]</label><input type="number" id="cfg-span" value="12.0" step="2.0"/></div>
-            <div class="field" style="grid-column: span 2;">
-              <label>Actions &amp; Parameter Sweeps</label>
-              <div class="btn-row">
-                <button class="btn primary" onclick="runManualMRR()">▶ Simulate</button>
-                <button class="btn amber" onclick="sendChatPrompt('Apply critical coupling')">⚡ Crit. Couple</button>
-                <button class="btn" onclick="sendChatPrompt('Sweep gap')">Sweep Gap</button>
-                <button class="btn" onclick="sendChatPrompt('Export single GDS layout')">💾 .GDS</button>
-                <button class="btn" onclick="exportSpectrumCSV()">📥 CSV</button>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" data-i18n="mode_card_field">2D Vector Eigenmode Field</span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <select id="mode-comp" onchange="renderSelectedMode()" style="background:#0d1424;color:#e2e8f0;border:1px solid var(--border);border-radius:6px;padding:3px 7px;font-size:11.5px;">
+                  <option value="E_abs">|E| Total</option>
+                  <option value="Ex_abs">|E_x| Radial (TE)</option>
+                  <option value="Ey_abs">|E_y| Vertical (TM)</option>
+                </select>
+                <span class="card-sub" id="mode-meta"></span>
               </div>
             </div>
+            <canvas class="plot-cv" id="cv-mode"></canvas>
+            <table class="clean-tbl" id="mode-table" style="margin-top:8px;">
+              <thead><tr><th>Mode</th><th>n_eff</th><th>TE %</th><th>Core Γ</th><th>A_eff [µm²]</th></tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
-          <div id="wl-warning-bar" style="display:none;margin-top:8px;padding:6px 10px;border-radius:6px;background:rgba(248,113,113,0.14);border:1px solid rgba(248,113,113,0.5);color:#fecaca;font-size:11.5px;"></div>
-        </details>
-      </div>
 
-      <div class="two-col">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Broadband Transmission Spectrum (Through &amp; Drop)</span>
-            <span id="spec-status" style="font-size:11px;color:var(--text-muted);">Ready</span>
-          </div>
-          <canvas class="plot-canvas" id="cv-spectrum"></canvas>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title" id="sweep-plot-title">Coupler Synthesis &amp; Parameter Sweep</span>
-            <span id="sweep-sub" style="font-size:11px;color:var(--accent-3);">Spatial CMT</span>
-          </div>
-          <canvas class="plot-canvas" id="cv-coupler"></canvas>
-        </div>
-      </div>
-
-      <div class="two-col">
-        <div class="card">
-          <div class="card-header"><span class="card-title">Top-Down Resonator &amp; Coupler Topology</span></div>
-          <div id="svg-topdown" style="height:175px;display:flex;align-items:center;justify-content:center;"></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">2D Waveguide Cross-Section Stack</span></div>
-          <div id="svg-xsec" style="height:175px;display:flex;align-items:center;justify-content:center;"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 2: BIDIRECTIONAL GDSII UPLOAD, VIEWER & MASK CREATOR -->
-    <section class="tab-pane" id="tab-gds">
-      <div class="two-col">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">A. Upload Existing .GDS / .OAS &rarr; Extract &amp; Simulate</span>
-            <span style="font-size:11px;color:var(--accent-3);">gdstk + Shapely Polygon Engine</span>
-          </div>
-          <div class="dropzone" onclick="document.getElementById('gds-file-picker').click()"
-               ondragover="event.preventDefault()"
-               ondrop="event.preventDefault(); if(event.dataTransfer.files[0]) handleGdsFileSelect(event.dataTransfer.files[0]);">
-            <div style="font-weight:700;color:#bae6fd;margin-bottom:4px;">Drop any `.gds` or `.oas` microring layout here (or click to browse)</div>
-            <div style="font-size:11px;color:var(--text-muted);">Auto-detects Circular / Racetrack / Pulley / Dual-Ring Vernier, measures R, W_ring, W_bus, gap &amp; wrap angle</div>
-            <input type="file" id="gds-file-picker" accept=".gds,.oas" style="display:none" onchange="handleGdsFileSelect(this.files[0])"/>
-          </div>
-          <div id="gds-extracted-box" style="margin-top:9px;font-size:11.5px;color:var(--text-muted);">
-            No external GDS uploaded yet — upload a `.gds` above or generate one on the right!
-          </div>
-          <div class="btn-row" style="margin-top:9px;">
-            <button class="btn primary" onclick="sendChatPrompt('Simulate current MRR')">▶ Simulate Extracted GDS Spectrum</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">B. Create Foundry .GDS + KLayout .LYP Mask</span>
-            <span style="font-size:11px;color:var(--text-muted);">Single Device or MPW Sweep Array</span>
-          </div>
-          <div class="param-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:9px;">
-            <div class="field"><label>Sweep Param</label>
-              <select id="gds-sw-param">
-                <option value="gap_thru_um">gap_thru_um [um]</option>
-                <option value="pulley_angle_thru_deg">pulley_angle [deg]</option>
-                <option value="straight_length_um">straight_L_s [um]</option>
-                <option value="ring_radius_um">ring_radius [um]</option>
-              </select>
-            </div>
-            <div class="field"><label>Start</label><input type="number" id="gds-sw-min" value="0.18" step="0.02"/></div>
-            <div class="field"><label>Stop</label><input type="number" id="gds-sw-max" value="0.30" step="0.02"/></div>
-            <div class="field"><label># Devices</label><input type="number" id="gds-sw-n" value="5" min="2" max="9"/></div>
-          </div>
-          <div class="btn-row">
-            <button class="btn green" onclick="createSingleGdsUI()">💾 Create Single MRR .GDS</button>
-            <button class="btn primary" onclick="createSweepArrayGdsUI()">📐 Create MPW Sweep Array .GDS</button>
-          </div>
-          <div id="gds-download-links" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Interactive 2D GDSII Polygon &amp; Caliper Inspector (Scroll to Zoom, Drag to Pan)</span>
-          <div class="btn-row">
-            <span id="gds-layer-pills" style="display:flex;gap:5px;"></span>
-            <button class="mini-btn" onclick="resetGdsCamera()">Fit View</button>
-          </div>
-        </div>
-        <canvas class="gds-canvas" id="cv-gds"></canvas>
-      </div>
-    </section>
-
-    <!-- TAB 3: 2D EIGENMODE & SINGLE-MODE WIDTH ADVISOR -->
-    <section class="tab-pane" id="tab-mode">
-      <div class="split-35-65">
-        <div class="card" style="display:flex;flex-direction:column;gap:9px;">
-          <div class="card-title">2D Full-Vector Eigenmode &amp; Cutoff Controls</div>
-          <div class="param-grid" style="grid-template-columns: 1fr 1fr;">
-            <div class="field"><label>Solver Backend</label>
-              <select id="mode-backend"><option value="fem">BSD Conformal FEM</option><option value="fde">Tidy3D Yee FDE</option></select>
-            </div>
-            <div class="field"><label>Field Component</label>
-              <select id="mode-comp" onchange="renderSelectedMode()"><option value="E_abs">|E| Total</option><option value="Ex_abs">|Ex| (TE)</option><option value="Ey_abs">|Ey| (TM)</option><option value="Ez_abs">|Ez| Longit.</option></select>
-            </div>
-            <div class="field"><label>Width W [um]</label><input type="number" id="mode-w" value="1.20" step="0.05"/></div>
-            <div class="field"><label>Bend Radius [um] (0=∞)</label><input type="number" id="mode-r" value="40.0" step="5.0"/></div>
-            <div class="field"><label>Sweep W_min [um]</label><input type="number" id="sw-wmin" value="0.50" step="0.05"/></div>
-            <div class="field"><label>Sweep W_max [um]</label><input type="number" id="sw-wmax" value="2.00" step="0.05"/></div>
-          </div>
-          <div class="btn-row">
-            <button class="btn primary" onclick="solve2DModesUI()">▶ Solve 2D Eigenmodes</button>
-            <button class="btn amber" onclick="runWidthSweepUI()">📏 Width Cutoff Sweep</button>
-          </div>
-          <table class="data-table" id="mode-table">
-            <thead><tr><th>#</th><th>n_eff</th><th>TE%</th><th>Gamma</th><th>A_eff</th></tr></thead>
-            <tbody><tr><td colspan="5" style="color:var(--text-muted);">Click Solve 2D Eigenmodes or ask Copilot</td></tr></tbody>
-          </table>
-        </div>
-
-        <div class="two-col" style="grid-template-columns: 1fr 1fr;">
           <div class="card">
-            <div class="card-header"><span class="card-title">2D Vector Mode Profile (Inferno |E|)</span><span id="mode-meta" style="font-size:11px;color:var(--accent-3);"></span></div>
-            <canvas class="plot-canvas" id="cv-mode" style="height:290px;"></canvas>
+            <div class="card-head">
+              <span class="card-title" data-i18n="mode_card_cutoff">Waveguide Width Dispersion &amp; Cutoff</span>
+              <span class="card-sub" id="width-cutoff-badge">2D FEM Sweep</span>
+            </div>
+            <canvas class="plot-cv tall" id="cv-width-sweep"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== STAGE 3: MRR SPECTRUM & COUPLER SYNTHESIS ==================== -->
+      <div class="stage-view" id="view-mrr">
+        <div id="wl-warning-bar" class="warn-banner"></div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mrr_lbl_fsr">Free Spectral Range</div>
+            <div class="kpi-val cyan" id="kpi-fsr">--</div>
+            <div class="kpi-sub" id="kpi-fsr-nm">-- nm</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mrr_lbl_loss">Prop. Loss α &amp; Q_int</div>
+            <div class="kpi-val green" id="kpi-loss">-- dB/cm</div>
+            <div class="kpi-sub" id="kpi-qint">Q_int --</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mrr_lbl_ql">Loaded Q Factor</div>
+            <div class="kpi-val" id="kpi-ql">--</div>
+            <div class="kpi-sub" id="kpi-fwhm">FWHM -- pm</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mrr_lbl_er">Extinction Ratio</div>
+            <div class="kpi-val amber" id="kpi-er">-- dB</div>
+            <div class="kpi-sub" id="kpi-regime">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="mrr_lbl_cc">Critical Coupling</div>
+            <div class="kpi-val green" id="kpi-cc">--</div>
+            <div class="kpi-sub" id="kpi-eo-eff">Target for α</div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="btn green sm" onclick="sendChatPrompt(currentLang==='zh'?'临界耦合':'Apply critical coupling')" data-i18n="mrr_btn_cc">⚡ Apply Critical Coupling</button>
+          <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描间距':'Sweep gap')" data-i18n="mrr_btn_sw_gap">📏 Sweep Gap</button>
+          <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描损耗':'Sweep propagation loss')" data-i18n="mrr_btn_sw_loss">📉 Sweep Loss (dB/cm)</button>
+          <button class="btn primary sm" onclick="sendChatPrompt(currentLang==='zh'?'导出单个 GDS 版图':'Export single GDS layout')" data-i18n="mrr_btn_gds">💾 Export .GDS Mask</button>
+          <button class="btn sm" onclick="exportSpectrumCSV()" data-i18n="mrr_btn_csv">📥 Download Spectrum .CSV</button>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="mrr_card_spec">Broadband Transmission Spectrum</span>
+            <span class="card-sub" id="kpi-qext">Through &amp; Drop Ports</span>
+          </div>
+          <canvas class="plot-cv" id="cv-spectrum"></canvas>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" id="sweep-plot-title" data-i18n="mrr_card_coupler">Coupler Critical-Coupling Synthesis</span>
+              <span class="card-sub" id="sweep-sub">Orange line = Critical Coupling</span>
+            </div>
+            <canvas class="plot-cv" id="cv-coupler"></canvas>
           </div>
           <div class="card">
-            <div class="card-header"><span class="card-title">Waveguide Width Dispersion &amp; Single-Mode Cutoff</span><span id="width-cutoff-badge" style="font-size:11px;color:var(--accent-2);"></span></div>
-            <canvas class="plot-canvas" id="cv-width-sweep" style="height:290px;"></canvas>
+            <div class="card-head">
+              <span class="card-title" data-i18n="mrr_card_schem">Resonator &amp; Cross-Section Schematic</span>
+              <span class="card-sub" id="kpi-shift">Δλ = 0.0 pm</span>
+            </div>
+            <div id="svg-topdown" style="display:flex;justify-content:center;margin-bottom:8px;"></div>
+            <div id="svg-xsec" style="display:flex;justify-content:center;"></div>
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- TAB 4: LAB SPECTRUM CMT FITTER -->
-    <section class="tab-pane" id="tab-fit">
-      <div class="split-35-65">
-        <div class="card" style="display:flex;flex-direction:column;gap:9px;">
-          <div class="card-title">Experimental MRR Spectrum CMT Fitter</div>
-          <div class="dropzone" onclick="document.getElementById('csv-fit-input').click()">
-            <div style="font-weight:700;color:#bae6fd;">Upload Measured `.csv` / `.txt` (wavelength_nm, transmission)</div>
-            <input type="file" id="csv-fit-input" accept=".csv,.txt,.tsv" style="display:none" onchange="loadLabCsvFile(this.files[0])"/>
+      <!-- ==================== STAGE 4: GDS UPLOAD & MASK CREATOR ==================== -->
+      <div class="stage-view" id="view-gds">
+        <div class="action-bar" style="justify-content:space-between;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="file" id="gds-file-input" accept=".gds,.gds2,.oas" style="display:none" onchange="handleGdsFileSelect(this.files[0])"/>
+            <button class="btn primary sm" onclick="document.getElementById('gds-file-input').click()" data-i18n="gds_btn_up">📂 Upload .GDS / .OAS</button>
+            <button class="btn green sm" onclick="createSingleGdsUI()" data-i18n="gds_btn_single">💾 Generate Single .GDS</button>
+            <button class="btn sm" onclick="createSweepArrayGdsUI()" data-i18n="gds_btn_array">🗂️ Generate 5-Ring Sweep Array .GDS</button>
           </div>
-          <div class="btn-row">
-            <button class="mini-btn" onclick="loadDemoSpectrum('split_doublet')">Demo: Split-Doublet</button>
-            <button class="mini-btn" onclick="loadDemoSpectrum('lorentzian')">Demo: Lorentzian</button>
-            <button class="mini-btn" onclick="loadDemoSpectrum('fano')">Demo: Fano</button>
-            <button class="mini-btn" onclick="loadDemoSpectrum('multi_fsr')">Demo: Multi-FSR n_g</button>
+          <div id="gds-download-links" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+
+        <div class="card" id="gds-extracted-box" style="font-size:12.8px;color:var(--text-sub);" data-i18n-html="gds_intro">
+          Upload an existing <code>.GDS</code> / <code>.OAS</code> layout or click <strong>Generate Single .GDS</strong> above to inspect polygons and automatic sub-nm coupler gap calipers.
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="gds_viewer_title">Interactive 2D GDSII Polygon &amp; Gap Caliper Viewer (Scroll Zoom · Drag Pan)</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <div id="gds-layer-pills" style="display:flex;gap:4px;"></div>
+              <button class="btn sm" onclick="resetGdsCamera()" data-i18n="gds_btn_reset">Reset Zoom</button>
+            </div>
           </div>
-          <div class="param-grid" style="grid-template-columns: 1fr 1fr;">
-            <div class="field"><label>CMT Model</label>
-              <select id="fit-model">
-                <option value="auto">Auto BIC Selection</option>
-                <option value="split_doublet">CW/CCW Split-Doublet</option>
-                <option value="lorentzian">All-Pass Lorentzian</option>
-                <option value="fano">Fano Interference</option>
-                <option value="multi_fsr">Broadband Multi-FSR</option>
+          <canvas class="plot-cv tall" id="cv-gds" style="height:370px;cursor:grab;"></canvas>
+        </div>
+      </div>
+
+      <!-- ==================== STAGE 5: LAB SPECTRUM LOSS (dB/cm) & Q EXTRACTOR ==================== -->
+      <div class="stage-view" id="view-fit">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n-html="fit_card_title">Extract Waveguide Propagation Loss (<code>dB/cm</code>) &amp; Q from Measured Spectrum</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <input type="file" id="csv-fit-input" accept=".csv,.txt,.tsv" style="display:none" onchange="loadLabCsvFile(this.files[0])"/>
+              <button class="btn primary sm" onclick="document.getElementById('csv-fit-input').click()" data-i18n="fit_btn_up">📂 Upload Lab .CSV / .TXT</button>
+              <button class="btn sm" onclick="loadDemoSpectrum('split_doublet')" data-i18n="fit_demo_doublet">Demo: Split Doublet</button>
+              <button class="btn sm" onclick="loadDemoSpectrum('lorentzian')" data-i18n="fit_demo_single">Demo: Single Dip</button>
+              <button class="btn sm" onclick="loadDemoSpectrum('multi_fsr')" data-i18n="fit_demo_mfsr">Demo: Multi-FSR (Auto n_g + Loss)</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:10px;align-items:end;">
+            <div class="field">
+              <label data-i18n="fit_lbl_model">CMT Lineshape Model</label>
+              <select id="fit-model" onchange="runCmtFitUI()">
+                <option value="auto">Auto (Lorentzian vs Doublet BIC)</option>
+                <option value="split_doublet">Backscattering Split Doublet</option>
+                <option value="lorentzian">Single Lorentzian</option>
+                <option value="fano">Fano + Etalon Background</option>
+                <option value="multi_fsr">Broadband Multi-FSR (Auto n_g &amp; α)</option>
               </select>
             </div>
-            <div class="field"><label>Coupling Regime</label>
-              <select id="fit-regime"><option value="">Unconstrained</option><option value="undercoupled">Undercoupled</option><option value="overcoupled">Overcoupled</option></select>
+            <div class="field">
+              <label data-i18n="fit_lbl_regime">Coupling Regime</label>
+              <select id="fit-regime" onchange="runCmtFitUI()">
+                <option value="">Auto / Report Both Branches</option>
+                <option value="under">Known Under-Coupled</option>
+                <option value="over">Known Over-Coupled</option>
+              </select>
             </div>
-            <div class="field" style="grid-column:span 2;"><label>Cavity Round-Trip Length L_rt [um]</label><input type="number" id="fit-lrt" value="263.89" step="1.0"/></div>
+            <div class="field">
+              <label data-i18n="fit_lbl_ng">Group Index n_g (for single dip)</label>
+              <input id="fit-ng" type="number" step="0.01" value="2.10" onchange="runCmtFitUI()"/>
+            </div>
+            <div class="field">
+              <label data-i18n="fit_lbl_lrt">Ring Length L_rt [µm] (2πR + 2L_s)</label>
+              <input id="fit-lrt" type="number" step="1" value="263.89" onchange="runCmtFitUI()"/>
+            </div>
+            <button class="btn green" onclick="runCmtFitUI()" data-i18n="fit_btn_run">Run Fit</button>
           </div>
-          <button class="btn primary" onclick="runCmtFitUI()">▶ Run CMT Parameter Extraction</button>
-          <div id="fit-results-box" style="font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--text-main);"></div>
         </div>
+
+        <div class="kpi-row four">
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fit_kpi1">Extracted Prop. Loss α</div>
+            <div class="kpi-val green" id="fit-kpi-loss">-- dB/cm</div>
+            <div class="kpi-sub" id="fit-kpi-loss-branches">From Q_int &amp; n_g</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fit_kpi2">Intrinsic Q_int</div>
+            <div class="kpi-val cyan" id="fit-kpi-qint">--</div>
+            <div class="kpi-sub" id="fit-kpi-rtloss">Round-trip loss --</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fit_kpi3">Loaded Q_L &amp; FWHM</div>
+            <div class="kpi-val" id="fit-kpi-ql">--</div>
+            <div class="kpi-sub" id="fit-kpi-fwhm">FWHM -- pm</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fit_kpi4">Model &amp; Splitting</div>
+            <div class="kpi-val amber" id="fit-kpi-split">--</div>
+            <div class="kpi-sub" id="fit-kpi-r2">R² = --</div>
+          </div>
+        </div>
+
+        <div class="action-bar" style="justify-content:space-between;">
+          <div id="fit-results-box" style="font-size:12.4px;color:var(--text-sub);line-height:1.5;" data-i18n-html="fit_intro">
+            Upload a two-column <code>wavelength_nm, transmission</code> file (linear power OR <code>dB</code>/<code>dBm</code>) to extract propagation loss <code>α [dB/cm]</code> and intrinsic <code>Q_int</code>.
+          </div>
+          <button class="btn green sm" id="btn-use-extracted-loss" style="display:none;" onclick="applyExtractedLossToDesign()">
+            🎯 Design New Ring with This Loss →
+          </button>
+        </div>
+
         <div class="card">
-          <div class="card-header"><span class="card-title">Measured Transmission vs Analytical CMT Fit</span></div>
-          <canvas class="plot-canvas" id="cv-fit" style="height:330px;"></canvas>
+          <div class="card-head">
+            <span class="card-title" data-i18n="fit_plot_title">Measured Spectrum vs. Analytical CMT Fit</span>
+            <span class="card-sub" data-i18n="fit_plot_sub">Supports Linear Power &amp; dB/dBm Traces</span>
+          </div>
+          <canvas class="plot-cv tall" id="cv-fit"></canvas>
         </div>
       </div>
-    </section>
 
-    <!-- TAB 5: 18-MATERIAL LIBRARY & GPU/CPU ENGINE -->
-    <section class="tab-pane" id="tab-mat">
-      <div class="two-col">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">24 Clean-Room Photonics Materials Dispersion (Visible 400 nm &rarr; Mid-IR 14 &mu;m)</span>
-            <select id="mat-browser-sel" onchange="loadMaterialCurve()" style="background:var(--bg-input);color:#fff;border:1px solid var(--border);border-radius:4px;padding:3px 7px;"></select>
-          </div>
-          <canvas class="plot-canvas" id="cv-mat" style="height:240px;"></canvas>
-          <div id="mat-props-text" style="margin-top:8px;font-size:11.5px;color:var(--text-muted);font-family:var(--font-mono);"></div>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Auto-Probed Compute Engine (Apple Silicon / NVIDIA CUDA / CPU)</span>
-            <button class="btn primary" onclick="runBenchmarkUI()">⚡ Run 100k-pt Benchmark</button>
-          </div>
-          <div id="hw-detail-box" style="font-family:var(--font-mono);font-size:12px;line-height:1.65;padding:8px 0;"></div>
-        </div>
-      </div>
-    </section>
-
+    </div>
   </main>
 </div>
 
+<!-- ==================== SLIDE-OVER EXPERT DRAWER (HIDDEN BY DEFAULT) ==================== -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="toggleExpertDrawer(false)"></div>
+<aside class="expert-drawer" id="expert-drawer">
+  <div class="drawer-header">
+    <div>
+      <div style="font-size:15px;font-weight:700;" data-i18n="exp_title">⚙ Expert Parameter Workbench</div>
+      <div style="font-size:11.5px;color:var(--text-muted);" data-i18n="exp_sub">Direct numerical override, 24-material dispersion &amp; hardware benchmark</div>
+    </div>
+    <button class="btn sm" onclick="toggleExpertDrawer(false)" data-i18n="exp_close">✕ Close</button>
+  </div>
+
+  <div class="drawer-body">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title" data-i18n="exp_override">Manual Geometry, Waveband &amp; Loss Override</span>
+        <button class="btn primary sm" onclick="runManualMRR(); toggleExpertDrawer(false);" data-i18n="exp_solve">▶ Solve &amp; Update</button>
+      </div>
+      <div class="expert-grid">
+        <div class="field"><label>Waveband Preset</label>
+          <select id="cfg-band" onchange="applyWavebandPresetUI(this.value)">
+            <option value="custom">-- Custom λ --</option>
+            <option value="532">Visible 532 nm</option>
+            <option value="780">Quantum 780 nm</option>
+            <option value="1310">O-Band 1310 nm</option>
+            <option value="1550" selected>C-Band 1550 nm</option>
+            <option value="2000">SWIR 2000 nm</option>
+            <option value="4200">Mid-IR 4200 nm</option>
+            <option value="7500">LWIR 7500 nm</option>
+          </select>
+        </div>
+        <div class="field"><label>Wavelength [nm]</label><input id="cfg-wl" type="number" step="1" value="1550"/></div>
+        <div class="field"><label>Core Material</label><select id="cfg-material"></select></div>
+        <div class="field"><label>Topology</label><select id="cfg-topology"></select></div>
+        <div class="field"><label>Bottom Clad</label>
+          <select id="cfg-clad"><option value="SiO2">SiO2</option><option value="CaF2">CaF2</option><option value="MgF2">MgF2</option><option value="Al2O3">Sapphire</option><option value="Si">Si</option></select>
+        </div>
+        <div class="field"><label>Top Clad</label>
+          <select id="cfg-topclad"><option value="SiO2">SiO2</option><option value="Air">Air</option><option value="CaF2">CaF2</option><option value="PMMA">PMMA</option></select>
+        </div>
+        <div class="field"><label>Polarization</label><select id="cfg-pol"><option value="TE0">TE0</option><option value="TM0">TM0</option></select></div>
+        <div class="field"><label>H_film [µm]</label><input id="cfg-hfilm" type="number" step="0.01" value="0.40"/></div>
+        <div class="field"><label>H_slab [µm]</label><input id="cfg-hslab" type="number" step="0.01" value="0.00"/></div>
+        <div class="field"><label>Sidewall [deg]</label><input id="cfg-sw" type="number" step="1" value="85"/></div>
+        <div class="field"><label>W_ring [µm]</label><input id="cfg-wring" type="number" step="0.02" value="1.20"/></div>
+        <div class="field"><label>W_bus [µm]</label><input id="cfg-wbus" type="number" step="0.02" value="1.00"/></div>
+        <div class="field"><label>Radius R_1 [µm]</label><input id="cfg-r1" type="number" step="1" value="40"/></div>
+        <div class="field"><label>Gap [µm]</label><input id="cfg-gap" type="number" step="0.005" value="0.25"/></div>
+        <div class="field"><label>Pulley θ [deg]</label><input id="cfg-theta" type="number" step="1" value="25"/></div>
+        <div class="field"><label>Straight L_s [µm]</label><input id="cfg-ls" type="number" step="1" value="12"/></div>
+        <div class="field"><label>Prop. Loss [dB/cm]</label><input id="cfg-loss" type="number" step="0.05" placeholder="Auto"/></div>
+        <div class="field"><label>Span [nm]</label><input id="cfg-span" type="number" step="1" value="12"/></div>
+        <div class="field"><label>Heater ΔT [K]</label><input id="cfg-dt" type="number" step="1" value="0"/></div>
+        <div class="field"><label>Bias V [V]</label><input id="cfg-volt" type="number" step="1" value="0"/></div>
+        <div class="field"><label>Ring-2 R_2 [µm]</label><input id="cfg-r2" type="number" step="0.5" value="42.5"/></div>
+      </div>
+      <!-- Hidden helper inputs for 2D mode & sweep array compatibility -->
+      <input type="hidden" id="mode-w" value="1.20"/>
+      <input type="hidden" id="mode-r" value="40"/>
+      <input type="hidden" id="mode-backend" value="fem"/>
+      <input type="hidden" id="gds-sw-param" value="gap_thru_um"/>
+      <input type="hidden" id="gds-sw-min" value="0.16"/>
+      <input type="hidden" id="gds-sw-max" value="0.32"/>
+      <input type="hidden" id="gds-sw-n" value="5"/>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">24-Material Sellmeier Dispersion (380 – 10,000 nm)</span>
+        <select id="mat-browser-sel" onchange="loadMaterialCurve()" style="background:#0d1424;color:#e2e8f0;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11.5px;"></select>
+      </div>
+      <canvas class="plot-cv" id="cv-mat" style="height:190px;"></canvas>
+      <div id="mat-props-text" style="margin-top:8px;font-size:11.5px;color:var(--text-muted);font-family:var(--font-mono);"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Local Compute Engine</span>
+        <button class="btn sm" onclick="runBenchmarkUI()">⚡ Benchmark</button>
+      </div>
+      <div id="hw-detail-box" style="font-size:12px;color:var(--text-sub);line-height:1.6;"></div>
+    </div>
+  </div>
+</aside>
+
 <script>
-// ==================== GLOBAL STATE ====================
+// ==================== GLOBAL STATE & BILINGUAL I18N ====================
+let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('openmrr_lang')) || 'en';
 let copilotSession = null;
 let catalogMaterials = [];
 let catalogTopologies = {};
@@ -750,75 +841,268 @@ let lastMrrResult = null;
 let lastModesData = null;
 let selectedModeIdx = 0;
 let lastWidthSweep = null;
-let labSpectrumData = null;
 let currentGdsView = null;
-let gdsCam = { scale: 1.0, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0, hiddenLayers: {} };
+let labSpectrumData = null;
+let lastExtractedLossDbCm = null;
+let aiBackendStatus = { offline: true, ollama_available: false, claude_cli_available: false, claude_env_key: false, codex_cli_available: false, codex_env_key: false };
 
-const LAYER_COLORS = {
-  "1/0": "#38bdf8",
-  "2/0": "#0284c7",
-  "10/0": "#f59e0b",
-  "11/0": "#eab308",
-  "65/0": "#34d399",
-  "66/0": "#e2e8f0"
+const UI_I18N = {
+  en: {
+    step1: 'Goal', step2: 'Waveband', step3: 'Material', step4: 'Stack & Mode', step5: 'Loss & Ring', step6: 'Optimize & GDS',
+    btn_reset: '↻ Start Over', btn_expert: '⚙ Expert Controls',
+    choices_caption: 'Suggested Next Step (Click or type below)',
+    btn_up_gds_short: '📐 Upload .GDS', btn_ext_loss_short: '📈 Extract Loss (.CSV)', lbl_ollama: 'Local LLM Tip',
+    ai_opt_offline: '⚡ Offline · Built-in Copilot',
+    ai_opt_ollama: '🖥 Offline · Local Ollama / MLX',
+    ai_opt_claude: '🟣 Online · Claude (CLI / API)',
+    ai_opt_codex: '🟢 Online · Codex / OpenAI (CLI / API)',
+    chat_placeholder: "Type an answer or spec (e.g. 'loss = 0.8 dB/cm, FSR 150 GHz, pulley')...",
+    btn_send: 'Send →',
+    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit',
+    status_ready: 'Ready · 400 nm – 14 µm',
+    wf1_title: '1. Design a New Ring Step-by-Step',
+    wf1_desc: 'Answer one simple question at a time — waveband, material, wafer stack, propagation loss (<code>dB/cm</code>), and target FSR.',
+    wf2_title: '2. Extract Loss (<code>dB/cm</code>) from Spectrum',
+    wf2_desc: 'Upload your measured <code>.CSV</code> trace (linear or <code>dB</code>) to fit <code>Q_int</code>, propagation loss <code>α [dB/cm]</code>, mode splitting &amp; <code>n_g</code>.',
+    wf3_title: '3. Upload &amp; Analyze a <code>.GDS</code> Mask',
+    wf3_desc: 'Inspect existing <code>.GDS</code> / <code>.OAS</code> layouts with automatic polygon gap calipers and simulate their optical spectrum.',
+    bp_card_title: 'Live Design Blueprint (Updates as You Chat)', bp_badge: 'Guided Setup',
+    bp_lbl_wl: 'Wavelength & Pol', bp_lbl_mat: 'Core Platform', bp_lbl_stack: 'Wafer Stack',
+    bp_lbl_loss: 'Propagation Loss α', bp_lbl_top: 'Topology', bp_lbl_geom: 'Radius & Gap',
+    mode_lbl_sm: 'Single-Mode Max Width', mode_lbl_wbus: 'Recommended Bus W', mode_lbl_wring: 'Recommended Ring W', mode_lbl_neff: 'Fundamental Mode',
+    mode_card_field: '2D Vector Eigenmode Field', mode_card_cutoff: 'Waveguide Width Dispersion & Cutoff',
+    mrr_lbl_fsr: 'Free Spectral Range', mrr_lbl_loss: 'Prop. Loss α & Q_int', mrr_lbl_ql: 'Loaded Q Factor', mrr_lbl_er: 'Extinction Ratio', mrr_lbl_cc: 'Critical Coupling',
+    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
+    mrr_btn_gds: '💾 Export .GDS Mask', mrr_btn_csv: '📥 Download Spectrum .CSV',
+    mrr_card_spec: 'Broadband Transmission Spectrum', mrr_card_coupler: 'Coupler Critical-Coupling Synthesis', mrr_card_schem: 'Resonator & Cross-Section Schematic',
+    gds_btn_up: '📂 Upload .GDS / .OAS', gds_btn_single: '💾 Generate Single .GDS', gds_btn_array: '🗂️ Generate 5-Ring Sweep Array .GDS',
+    gds_intro: 'Upload an existing <code>.GDS</code> / <code>.OAS</code> layout or click <strong>Generate Single .GDS</strong> above to inspect polygons and automatic sub-nm coupler gap calipers.',
+    gds_viewer_title: 'Interactive 2D GDSII Polygon & Gap Caliper Viewer (Scroll Zoom · Drag Pan)', gds_btn_reset: 'Reset Zoom',
+    fit_card_title: 'Extract Waveguide Propagation Loss (<code>dB/cm</code>) &amp; Q from Measured Spectrum',
+    fit_btn_up: '📂 Upload Lab .CSV / .TXT', fit_demo_doublet: 'Demo: Split Doublet', fit_demo_single: 'Demo: Single Dip', fit_demo_mfsr: 'Demo: Multi-FSR (Auto n_g + Loss)',
+    fit_lbl_model: 'CMT Lineshape Model', fit_lbl_regime: 'Coupling Regime', fit_lbl_ng: 'Group Index n_g (for single dip)', fit_lbl_lrt: 'Ring Length L_rt [µm] (2πR + 2L_s)',
+    fit_btn_run: 'Run Fit',
+    fit_kpi1: 'Extracted Prop. Loss α', fit_kpi2: 'Intrinsic Q_int', fit_kpi3: 'Loaded Q_L & FWHM', fit_kpi4: 'Model & Splitting',
+    fit_intro: 'Upload a two-column <code>wavelength_nm, transmission</code> file (linear power OR <code>dB</code>/<code>dBm</code>) to extract propagation loss <code>α [dB/cm]</code> and intrinsic <code>Q_int</code>.',
+    fit_plot_title: 'Measured Spectrum vs. Analytical CMT Fit', fit_plot_sub: 'Supports Linear Power & dB/dBm Traces',
+    exp_title: '⚙ Expert Parameter Workbench', exp_sub: 'Direct numerical override, 24-material dispersion & hardware benchmark',
+    exp_close: '✕ Close', exp_override: 'Manual Geometry, Waveband & Loss Override', exp_solve: '▶ Solve & Update'
+  },
+  zh: {
+    step1: '选择目标', step2: '工作波段', step3: '芯层材料', step4: '叠层与模式', step5: '损耗与微环', step6: '耦合优化与版图',
+    btn_reset: '↻ 重新开始', btn_expert: '⚙ 专家参数',
+    choices_caption: '下一步引导选项（点击按钮或在下方输入）',
+    btn_up_gds_short: '📐 上传 .GDS', btn_ext_loss_short: '📈 提取损耗 (.CSV)', lbl_ollama: '本地大模型建议',
+    ai_opt_offline: '⚡ 离线模式 · 内置物理引擎',
+    ai_opt_ollama: '🖥 离线模式 · 本地 Ollama / MLX',
+    ai_opt_claude: '🟣 在线模式 · Claude (CLI / API)',
+    ai_opt_codex: '🟢 在线模式 · Codex / OpenAI (CLI / API)',
+    chat_placeholder: '输入您的需求或参数（例如：损耗 0.8 dB/cm, FSR 150 GHz, 滑轮耦合）...',
+    btn_send: '发送 →',
+    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合',
+    status_ready: '就绪 · 400 nm – 14 µm',
+    wf1_title: '1. 逐步引导设计新微环',
+    wf1_desc: '每次只问一个清晰问题——工作波段、波导材料、晶圆叠层、传播损耗 (<code>dB/cm</code>) 与目标 FSR。',
+    wf2_title: '2. 从实测光谱提取损耗 (<code>dB/cm</code>)',
+    wf2_desc: '上传实验 <code>.CSV</code> 透射谱（支持线性功率或 <code>dB</code>/<code>dBm</code>），自动拟合 <code>Q_int</code>、传播损耗 <code>α [dB/cm]</code>、背向散射双峰劈裂与 <code>n_g</code>。',
+    wf3_title: '3. 上传并解析 <code>.GDS</code> 版图',
+    wf3_desc: '读取已有 <code>.GDS</code> / <code>.OAS</code> 掩膜版图，自动亚纳米测量耦合间距并计算透射光谱。',
+    bp_card_title: '实时设计参数蓝图（随对话自动更新）', bp_badge: '分步引导模式',
+    bp_lbl_wl: '工作波长与偏振', bp_lbl_mat: '波导芯层平台', bp_lbl_stack: '晶圆垂直叠层',
+    bp_lbl_loss: '波导传播损耗 α', bp_lbl_top: '微环拓扑结构', bp_lbl_geom: '半径与耦合间距',
+    mode_lbl_sm: '单模最大截止宽度', mode_lbl_wbus: '推荐直波导宽 W_bus', mode_lbl_wring: '推荐微环宽 W_ring', mode_lbl_neff: '基模有效折射率',
+    mode_card_field: '二维全矢量本征模场分布', mode_card_cutoff: '波导宽度色散与单模截止曲线',
+    mrr_lbl_fsr: '自由光谱范围 FSR', mrr_lbl_loss: '传播损耗 α 与本征 Q', mrr_lbl_ql: '有载品质因数 Q_L', mrr_lbl_er: '谐振消光比 ER', mrr_lbl_cc: '临界耦合目标参数',
+    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
+    mrr_btn_gds: '💾 导出 .GDS 掩膜版图', mrr_btn_csv: '📥 下载光谱 .CSV',
+    mrr_card_spec: '宽谱透射与下载光谱', mrr_card_coupler: '耦合器临界耦合综合曲线', mrr_card_schem: '微环拓扑与波导截面示意图',
+    gds_btn_up: '📂 上传 .GDS / .OAS', gds_btn_single: '💾 生成单器件 .GDS', gds_btn_array: '🗂️ 生成 5 环容差阵列 .GDS',
+    gds_intro: '请上传已有 <code>.GDS</code> / <code>.OAS</code> 版图，或点击上方 <strong>生成单器件 .GDS</strong> 查看多边形与耦合间距自动卡尺。',
+    gds_viewer_title: '交互式 2D GDSII 多边形与耦合间距卡尺预览（滚轮缩放 · 拖拽平移）', gds_btn_reset: '重置缩放',
+    fit_card_title: '从实测透射谱提取波导传播损耗 (<code>dB/cm</code>) 与本征 Q 值',
+    fit_btn_up: '📂 上传实验 .CSV / .TXT', fit_demo_doublet: '示例：高Q双峰劈裂', fit_demo_single: '示例：单谐振谷', fit_demo_mfsr: '示例：多谐振峰 (自动提取 n_g + 损耗)',
+    fit_lbl_model: '耦合模线型模型', fit_lbl_regime: '耦合状态分支', fit_lbl_ng: '群折射率 n_g (单峰拟合用)', fit_lbl_lrt: '微环周长 L_rt [µm] (2πR + 2L_s)',
+    fit_btn_run: '运行拟合',
+    fit_kpi1: '提取波导传播损耗 α', fit_kpi2: '本征品质因数 Q_int', fit_kpi3: '有载 Q_L 与线宽', fit_kpi4: '拟合模型与模式劈裂',
+    fit_intro: '上传两列 <code>wavelength_nm, transmission</code> 数据（支持线性透过率或 <code>dB</code>/<code>dBm</code>），一键提取波导传播损耗 <code>α [dB/cm]</code> 与 <code>Q_int</code>。',
+    fit_plot_title: '实验测量光谱 vs. 解析耦合模 (CMT) 拟合曲线', fit_plot_sub: '自动兼容线性功率与 dB/dBm 光谱',
+    exp_title: '⚙ 专家参数工作台', exp_sub: '直接数值覆盖、24 种跨波段材料色散库与硬件算力基准测试',
+    exp_close: '✕ 关闭', exp_override: '手动几何、波长与损耗覆盖', exp_solve: '▶ 求解并更新'
+  }
 };
 
-function switchTab(tabId) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === tabId));
-  if (tabId === 'tab-gds' && currentGdsView) setTimeout(drawGdsCanvas, 30);
-  if (tabId === 'tab-mrr' && lastMrrResult) setTimeout(() => renderMrrResult(lastMrrResult), 30);
-}
+function applyUiTranslations() {
+  const dict = UI_I18N[currentLang] || UI_I18N.en;
+  document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('lang-en').classList.toggle('active', currentLang === 'en');
+  document.getElementById('lang-zh').classList.toggle('active', currentLang === 'zh');
 
-function toggleCopilot() {
-  document.getElementById('copilot-dock').classList.toggle('collapsed');
-}
-
-// ==================== MARKDOWN MINI-FORMATTER ====================
-function fmtMd(raw) {
-  let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-  const lines = s.split('\n');
-  let out = [], inList = false;
-  for (const ln of lines) {
-    if (ln.trim().startsWith('- ')) {
-      if (!inList) { out.push('<ul>'); inList = true; }
-      out.push('<li>' + ln.trim().slice(2) + '</li>');
-    } else {
-      if (inList) { out.push('</ul>'); inList = false; }
-      if (ln.trim() === '') out.push('<div style="height:5px"></div>');
-      else out.push('<div>' + ln + '</div>');
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const k = el.getAttribute('data-i18n');
+    if (dict[k]) el.textContent = dict[k];
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    const k = el.getAttribute('data-i18n-html');
+    if (dict[k] && !(el.id === 'fit-results-box' && lastExtractedLossDbCm !== null) && !(el.id === 'gds-extracted-box' && currentGdsView)) {
+      el.innerHTML = dict[k];
+    }
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const k = el.getAttribute('data-i18n-placeholder');
+    if (dict[k]) el.placeholder = dict[k];
+  });
+  if (lastExtractedLossDbCm !== null) {
+    const useBtn = document.getElementById('btn-use-extracted-loss');
+    if (useBtn) {
+      useBtn.textContent = currentLang === 'zh'
+        ? `🎯 用 α = ${Number(lastExtractedLossDbCm).toFixed(2)} dB/cm 设计新微环 →`
+        : `🎯 Design Ring with α = ${Number(lastExtractedLossDbCm).toFixed(2)} dB/cm →`;
     }
   }
-  if (inList) out.push('</ul>');
-  return out.join('');
+  if (copilotSession && copilotSession.config) syncFormFromConfig(copilotSession.config);
+}
+
+async function setLanguage(lang) {
+  currentLang = (lang === 'zh') ? 'zh' : 'en';
+  try { localStorage.setItem('openmrr_lang', currentLang); } catch (_) {}
+  applyUiTranslations();
+
+  if (!copilotSession || (copilotSession.stage === 'welcome' && (copilotSession.history || []).length <= 1)) {
+    await initChat();
+    return;
+  }
+  copilotSession.lang = currentLang;
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: copilotSession, message: '__switch_lang__', lang: currentLang })
+    });
+    const data = await r.json();
+    if (!data.error) {
+      copilotSession = data.session;
+      renderChips(data.chips);
+    }
+  } catch (_) {}
+}
+
+let gdsCam = { scale: 1.0, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0, hiddenLayers: {} };
+const LAYER_COLORS = {
+  '1/0': '#38bdf8', '2/0': '#0284c7', '3/0': '#a78bfa', '4/0': '#f43f5e',
+  '10/0': '#f59e0b', '11/0': '#eab308', '65/0': '#34d399', '66/0': '#cbd5e1', '68/0': '#475569'
+};
+
+// ==================== UI NAVIGATION & STEPPER ====================
+function setStageView(viewName) {
+  document.querySelectorAll('.stage-view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.stage-pill').forEach(p => p.classList.remove('active'));
+  const vEl = document.getElementById('view-' + viewName);
+  const pEl = document.getElementById('pill-' + viewName);
+  if (vEl) vEl.classList.add('active');
+  if (pEl) pEl.classList.add('active');
+
+  setTimeout(() => {
+    if (viewName === 'mrr' && lastMrrResult) renderMrrResult(lastMrrResult);
+    if (viewName === 'mode') {
+      if (lastModesData) renderSelectedMode();
+      if (lastWidthSweep) drawWidthSweepPlot(lastWidthSweep);
+    }
+    if (viewName === 'gds' && currentGdsView) drawGdsCanvas();
+    if (viewName === 'fit' && labSpectrumData) runCmtFitUI();
+  }, 25);
+}
+
+function updateStepper(stepNum) {
+  const s = Number(stepNum) || 1;
+  document.querySelectorAll('#wizard-stepper .step-item').forEach(el => {
+    const n = Number(el.dataset.step);
+    const badge = el.querySelector('.step-num');
+    el.classList.remove('active', 'done');
+    if (n < s) {
+      el.classList.add('done');
+      badge.textContent = '✓';
+    } else if (n === s) {
+      el.classList.add('active');
+      badge.textContent = String(n);
+    } else {
+      badge.textContent = String(n);
+    }
+  });
+}
+
+function toggleExpertDrawer(open) {
+  document.getElementById('drawer-backdrop').classList.toggle('open', open);
+  document.getElementById('expert-drawer').classList.toggle('open', open);
+  if (open) setTimeout(loadMaterialCurve, 50);
+}
+
+function openSpectrumFitterDirect() {
+  setStageView('fit');
+  if (!labSpectrumData) loadDemoSpectrum('split_doublet');
+}
+
+// ==================== CLEAN MARKDOWN RENDERER ====================
+function formatMarkdown(md) {
+  let s = md
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\$\\Rightarrow\$/g, '⇒')
+    .replace(/\$\\iff\$/g, '⇔')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  const lines = s.split('\n');
+  let html = '', inList = false;
+  for (const ln of lines) {
+    if (ln.trim().startsWith('- ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += '<li>' + ln.trim().slice(2) + '</li>';
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      if (ln.trim() === '') html += '<div style="height:6px;"></div>';
+      else html += '<div>' + ln + '</div>';
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
 }
 
 function appendChatBubble(role, text) {
   const box = document.getElementById('chat-messages');
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  div.innerHTML = role === 'assistant' ? fmtMd(text) : text.replace(/</g, '&lt;');
-  box.appendChild(div);
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + role;
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = role === 'assistant' ? 'M' : (currentLang === 'zh' ? '我' : 'You');
+  const bub = document.createElement('div');
+  bub.className = 'bubble';
+  bub.innerHTML = formatMarkdown(text);
+  row.appendChild(av);
+  row.appendChild(bub);
+  box.appendChild(row);
   box.scrollTop = box.scrollHeight;
-  return div;
+  return row;
 }
 
 function renderChips(chips) {
-  const tray = document.getElementById('chip-tray');
-  tray.innerHTML = '';
+  const wrap = document.getElementById('chat-chips');
+  wrap.innerHTML = '';
   (chips || []).forEach(c => {
-    const btn = document.createElement('button');
-    btn.className = 'chip';
-    btn.textContent = c.label;
-    btn.onclick = () => sendChatPrompt(c.prompt);
-    tray.appendChild(btn);
+    const b = document.createElement('button');
+    b.className = 'chip-btn';
+    b.textContent = c.label;
+    b.onclick = () => {
+      if (c.ui_action === 'open_gds_picker') {
+        document.getElementById('gds-file-input').click();
+      } else {
+        sendChatPrompt(c.prompt);
+      }
+    };
+    wrap.appendChild(b);
   });
 }
 
-// ==================== SYNC CONFIG <-> FORM ====================
+// ==================== SYNC FORM & LIVE BLUEPRINT ====================
 function syncFormFromConfig(cfg) {
   if (!cfg) return;
   const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null) el.value = v; };
@@ -828,12 +1112,6 @@ function syncFormFromConfig(cfg) {
   setVal('cfg-topclad', cfg.top_clad_material);
   setVal('cfg-pol', cfg.polarization);
   setVal('cfg-wl', cfg.wavelength_nm);
-  const bandEl = document.getElementById('cfg-band');
-  if (bandEl && cfg.wavelength_nm !== undefined) {
-    const known = ['532', '633', '780', '1310', '1550', '2000', '3800', '4200', '7500'];
-    const sWl = String(Math.round(cfg.wavelength_nm));
-    bandEl.value = known.includes(sWl) ? sWl : 'custom';
-  }
   setVal('cfg-hfilm', cfg.film_height_um);
   setVal('cfg-hslab', cfg.slab_height_um);
   setVal('cfg-sw', cfg.sidewall_deg);
@@ -847,49 +1125,40 @@ function syncFormFromConfig(cfg) {
   setVal('cfg-volt', cfg.voltage_v);
   setVal('cfg-r2', cfg.ring2_radius_um);
   setVal('cfg-span', cfg.span_nm);
+  document.getElementById('cfg-loss').value = (cfg.alpha_loss_db_per_cm !== null && cfg.alpha_loss_db_per_cm !== undefined) ? cfg.alpha_loss_db_per_cm : '';
   setVal('mode-w', cfg.ring_width_um);
   setVal('mode-r', cfg.ring_radius_um);
-  renderSchematicsSVG(cfg);
-}
 
-function applyWavebandPresetUI(val) {
-  if (val === 'custom') return;
-  const wl = parseFloat(val);
-  document.getElementById('cfg-wl').value = wl;
-  let curMat = document.getElementById('cfg-material').value;
-  // Auto-select transparent core/cladding & physical single-mode geometry for chosen waveband
-  if (wl < 1050 && (curMat === 'Si' || curMat === 'Ge' || curMat === 'a-Si')) {
-    curMat = 'Si3N4';
-    document.getElementById('cfg-material').value = 'Si3N4';
-  } else if (wl > 5500 && curMat !== 'Ge' && curMat !== 'Diamond') {
-    curMat = 'Ge';
-    document.getElementById('cfg-material').value = 'Ge';
-  }
-  if (wl > 3650) {
-    document.getElementById('cfg-clad').value = (wl > 5500 && curMat === 'Ge') ? 'Si' : 'CaF2';
-    document.getElementById('cfg-topclad').value = 'Air';
-  } else {
-    document.getElementById('cfg-clad').value = 'SiO2';
-    document.getElementById('cfg-topclad').value = 'SiO2';
-  }
-  const r = wl / 1550.0;
-  document.getElementById('cfg-hfilm').value = (curMat === 'Si' && wl >= 1200 && wl <= 1680) ? 0.22 : Math.max(0.14, +(0.38 * Math.pow(r, 0.88)).toFixed(2));
-  document.getElementById('cfg-wring').value = Math.max(0.28, +(((curMat === 'Si') ? 0.48 : 1.05) * Math.pow(r, 0.88)).toFixed(2));
-  document.getElementById('cfg-wbus').value = Math.max(0.24, +(((curMat === 'Si') ? 0.42 : 0.90) * Math.pow(r, 0.88)).toFixed(2));
-  document.getElementById('cfg-gap').value = Math.max(0.12, +(0.24 * Math.pow(r, 0.65)).toFixed(2));
-  document.getElementById('cfg-span').value = Math.max(2.0, +(12.0 * Math.pow(r, 1.80)).toFixed(1));
-  runManualMRR();
+  // Update Blueprint Summary Cards
+  const hNm = Math.round((cfg.film_height_um || 0.4) * 1000);
+  const sNm = Math.round((cfg.slab_height_um || 0) * 1000);
+  document.getElementById('bp-wl').textContent = `${cfg.wavelength_nm} nm · ${cfg.polarization}`;
+  document.getElementById('bp-mat').textContent = `${cfg.core_material} (${cfg.top_clad_material}/${cfg.clad_material||'SiO2'})`;
+  document.getElementById('bp-stack').textContent = sNm > 0
+    ? (currentLang === 'zh' ? `H=${hNm} nm, 平板=${sNm} nm` : `H=${hNm} nm, Slab=${sNm} nm`)
+    : (currentLang === 'zh' ? `H=${hNm} nm, 条形波导` : `H=${hNm} nm, Strip`);
+  document.getElementById('bp-loss').textContent = (cfg.alpha_loss_db_per_cm !== null && cfg.alpha_loss_db_per_cm !== undefined)
+    ? `${cfg.alpha_loss_db_per_cm} dB/cm`
+    : (currentLang === 'zh' ? '工艺默认损耗' : 'Foundry Typical');
+  document.getElementById('bp-top').textContent = (catalogTopologies[cfg.topology] && catalogTopologies[cfg.topology].name) || cfg.topology;
+  document.getElementById('bp-geom').textContent = `R=${cfg.ring_radius_um} µm · g=${Math.round((cfg.gap_thru_um||0.25)*1000)} nm`;
+
+  // Also keep Fitter L_rt synced to current ring circumference!
+  const lRt = 2 * Math.PI * (cfg.ring_radius_um || 40) + (cfg.topology && cfg.topology.startsWith('racetrack') ? 2 * (cfg.straight_length_um || 0) : 0);
+  if (!labSpectrumData) document.getElementById('fit-lrt').value = lRt.toFixed(2);
+
+  renderSchematicsSVG(cfg);
 }
 
 function readConfigFromForm() {
   const num = (id, fb) => { const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v) ? v : fb; };
   const lossRaw = document.getElementById('cfg-loss').value;
   return {
-    topology: document.getElementById('cfg-topology').value,
-    core_material: document.getElementById('cfg-material').value,
-    clad_material: (document.getElementById('cfg-clad') && document.getElementById('cfg-clad').value) || 'SiO2',
-    top_clad_material: document.getElementById('cfg-topclad').value,
-    polarization: document.getElementById('cfg-pol').value,
+    topology: document.getElementById('cfg-topology').value || 'point_circular_ap',
+    core_material: document.getElementById('cfg-material').value || 'Si3N4',
+    clad_material: document.getElementById('cfg-clad').value || 'SiO2',
+    top_clad_material: document.getElementById('cfg-topclad').value || 'SiO2',
+    polarization: document.getElementById('cfg-pol').value || 'TE0',
     wavelength_nm: num('cfg-wl', 1550),
     film_height_um: num('cfg-hfilm', 0.40),
     slab_height_um: num('cfg-hslab', 0.0),
@@ -910,14 +1179,44 @@ function readConfigFromForm() {
   };
 }
 
-// ==================== CHATBOT API ====================
+function applyWavebandPresetUI(val) {
+  if (val === 'custom') return;
+  const wl = parseFloat(val);
+  document.getElementById('cfg-wl').value = wl;
+  let curMat = document.getElementById('cfg-material').value;
+  if (wl < 1050 && (curMat === 'Si' || curMat === 'Ge' || curMat === 'a-Si')) {
+    curMat = 'Si3N4'; document.getElementById('cfg-material').value = 'Si3N4';
+  } else if (wl > 5500 && curMat !== 'Ge' && curMat !== 'Diamond') {
+    curMat = 'Ge'; document.getElementById('cfg-material').value = 'Ge';
+  }
+  if (wl > 3650) {
+    document.getElementById('cfg-clad').value = (wl > 5500 && curMat === 'Ge') ? 'Si' : 'CaF2';
+    document.getElementById('cfg-topclad').value = 'Air';
+  } else {
+    document.getElementById('cfg-clad').value = 'SiO2';
+    document.getElementById('cfg-topclad').value = 'SiO2';
+  }
+  const r = wl / 1550.0;
+  document.getElementById('cfg-hfilm').value = (curMat === 'Si' && wl >= 1200 && wl <= 1680) ? 0.22 : Math.max(0.14, +(0.38 * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-wring').value = Math.max(0.28, +(((curMat === 'Si') ? 0.48 : 1.05) * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-wbus').value = Math.max(0.24, +(((curMat === 'Si') ? 0.42 : 0.90) * Math.pow(r, 0.88)).toFixed(2));
+  document.getElementById('cfg-gap').value = Math.max(0.12, +(0.24 * Math.pow(r, 0.65)).toFixed(2));
+  document.getElementById('cfg-span').value = Math.max(2.0, +(12.0 * Math.pow(r, 1.80)).toFixed(1));
+}
+
+// ==================== GUIDED CHATBOT API ====================
 async function initChat() {
-  const r = await fetch('/api/chat_init', { method: 'POST' });
+  const r = await fetch(`/api/chat_init?lang=${encodeURIComponent(currentLang)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang: currentLang })
+  });
   const data = await r.json();
   copilotSession = data.session;
   document.getElementById('chat-messages').innerHTML = '';
   appendChatBubble('assistant', data.assistant_message);
   renderChips(data.chips);
+  updateStepper(copilotSession.wizard_step || 1);
   syncFormFromConfig(copilotSession.config);
 }
 
@@ -929,11 +1228,78 @@ async function sendUserChat() {
   await sendChatPrompt(txt);
 }
 
+function saveSessionApiKey(val) {
+  const mode = document.getElementById('ai-mode-select').value;
+  try { sessionStorage.setItem('openmrr_key_' + mode, val.trim()); } catch (_) {}
+  updateAiModeBadge();
+}
+
+function getSessionApiKey(mode) {
+  try { return sessionStorage.getItem('openmrr_key_' + mode) || ''; } catch (_) { return ''; }
+}
+
+function toggleAiKeyBox(forceOpen) {
+  const bar = document.getElementById('ai-key-bar');
+  const nextShow = (typeof forceOpen === 'boolean') ? forceOpen : (bar.style.display === 'none');
+  bar.style.display = nextShow ? 'block' : 'none';
+  if (nextShow) {
+    const mode = document.getElementById('ai-mode-select').value;
+    const inp = document.getElementById('ai-api-key-input');
+    inp.value = getSessionApiKey(mode);
+    inp.placeholder = mode === 'claude'
+      ? (currentLang === 'zh' ? '输入 Anthropic API Key (仅存于内存；若已登录 claude CLI 可留空)' : 'Anthropic sk-ant-... key (memory only; leave blank if claude CLI is signed in)')
+      : (currentLang === 'zh' ? '输入 OpenAI API Key (仅存于内存；若已登录 codex CLI 可留空)' : 'OpenAI sk-... key (memory only; leave blank if codex CLI is signed in)');
+  }
+}
+
+function updateAiModeBadge() {
+  const mode = document.getElementById('ai-mode-select').value;
+  const badge = document.getElementById('ai-mode-badge');
+  const keyBtn = document.getElementById('btn-ai-key');
+  if (mode === 'offline') {
+    badge.style.display = 'none';
+    keyBtn.style.display = 'none';
+    document.getElementById('ai-key-bar').style.display = 'none';
+  } else if (mode === 'ollama') {
+    keyBtn.style.display = 'none';
+    document.getElementById('ai-key-bar').style.display = 'none';
+    badge.style.display = 'inline';
+    badge.style.color = aiBackendStatus.ollama_available ? '#34d399' : '#f59e0b';
+    badge.textContent = aiBackendStatus.ollama_available ? '✓ Local Ready' : '127.0.0.1';
+  } else if (mode === 'claude') {
+    keyBtn.style.display = 'inline-flex';
+    badge.style.display = 'inline';
+    const ready = aiBackendStatus.claude_cli_available || aiBackendStatus.claude_env_key || !!getSessionApiKey('claude');
+    badge.style.color = ready ? '#34d399' : '#f59e0b';
+    badge.textContent = aiBackendStatus.claude_cli_available ? '✓ Claude CLI' : (ready ? '✓ Key Set' : 'Key / CLI');
+  } else if (mode === 'codex') {
+    keyBtn.style.display = 'inline-flex';
+    badge.style.display = 'inline';
+    const ready = aiBackendStatus.codex_cli_available || aiBackendStatus.codex_env_key || !!getSessionApiKey('codex');
+    badge.style.color = ready ? '#34d399' : '#f59e0b';
+    badge.textContent = aiBackendStatus.codex_cli_available ? '✓ Codex CLI' : (ready ? '✓ Key Set' : 'Key / CLI');
+  }
+}
+
+function onAiModeChange() {
+  const mode = document.getElementById('ai-mode-select').value;
+  updateAiModeBadge();
+  if (mode === 'claude' && !aiBackendStatus.claude_cli_available && !aiBackendStatus.claude_env_key && !getSessionApiKey('claude')) {
+    toggleAiKeyBox(true);
+  } else if (mode === 'codex' && !aiBackendStatus.codex_cli_available && !aiBackendStatus.codex_env_key && !getSessionApiKey('codex')) {
+    toggleAiKeyBox(true);
+  } else {
+    toggleAiKeyBox(false);
+  }
+}
+
 async function sendChatPrompt(promptText) {
   const btn = document.getElementById('chat-send-btn');
   btn.disabled = true;
+  const aiMode = document.getElementById('ai-mode-select').value || 'offline';
+  const aiKey = getSessionApiKey(aiMode);
   if (promptText.toLowerCase() !== 'reset') appendChatBubble('user', promptText);
-  const thinking = appendChatBubble('assistant', 'Solving Maxwell eigenmodes / CMT...');
+  const thinking = appendChatBubble('assistant', currentLang === 'zh' ? '正在计算当前步骤...' : 'Working on your step...');
   try {
     const r = await fetch('/api/chat', {
       method: 'POST',
@@ -941,13 +1307,16 @@ async function sendChatPrompt(promptText) {
       body: JSON.stringify({
         session: copilotSession,
         message: promptText,
-        use_ollama: document.getElementById('chk-ollama').checked
+        lang: currentLang,
+        ai_mode: aiMode,
+        ai_api_key: aiKey,
+        use_ollama: aiMode === 'ollama'
       })
     });
     const data = await r.json();
     thinking.remove();
     if (data.error) {
-      appendChatBubble('assistant', '**Solver Error**: `' + data.error + '`');
+      appendChatBubble('assistant', '**Solver Notice**: `' + data.error + '`');
       return;
     }
     copilotSession = data.session;
@@ -955,16 +1324,22 @@ async function sendChatPrompt(promptText) {
     appendChatBubble('assistant', data.assistant_message);
     renderChips(data.chips);
     syncFormFromConfig(copilotSession.config);
+    updateStepper(data.wizard_step || copilotSession.wizard_step || 1);
 
-    if (data.active_tab) switchTab(data.active_tab);
-    if (data.mrr_result) {
-      lastMrrResult = data.mrr_result;
-      renderMrrResult(data.mrr_result);
-    }
+    if (data.ui_view) setStageView(data.ui_view);
+    if (data.auto_demo_fit && !labSpectrumData) loadDemoSpectrum('split_doublet');
+
     if (data.width_sweep_result) {
       lastWidthSweep = data.width_sweep_result;
       drawWidthSweepPlot(data.width_sweep_result);
       solve2DModesUI();
+    }
+    if (data.mrr_result) {
+      lastMrrResult = data.mrr_result;
+      renderMrrResult(data.mrr_result);
+      document.getElementById('spec-status').textContent = currentLang === 'zh'
+        ? `求解完成 (${data.mrr_result.elapsed_ms} ms)`
+        : `Solved in ${data.mrr_result.elapsed_ms} ms`;
     }
     if (data.mrr_sweep_result) {
       drawMrrSweepPlot(data.mrr_sweep_result);
@@ -980,7 +1355,7 @@ async function sendChatPrompt(promptText) {
   }
 }
 
-// ==================== RETINA CANVAS PLOTTING HELPERS ====================
+// ==================== RETINA CANVAS PLOTTING ====================
 function setupCanvas(id) {
   const cv = document.getElementById(id);
   const dpr = window.devicePixelRatio || 2;
@@ -996,9 +1371,9 @@ function setupCanvas(id) {
 
 function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
   const { ctx, w, h } = setupCanvas(canvasId);
-  ctx.fillStyle = '#080d18';
+  ctx.fillStyle = '#070b14';
   ctx.fillRect(0, 0, w, h);
-  const pad = { l: 52, r: 18, t: 18, b: 34 };
+  const pad = { l: 54, r: 18, t: 22, b: 36 };
   const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
 
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
@@ -1012,17 +1387,16 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
   });
   if (!Number.isFinite(xmin)) return;
   if (Math.abs(ymax - ymin) < 1e-9) { ymax += 1; ymin -= 1; }
-  const ym = 0.07 * (ymax - ymin); ymin -= ym; ymax += ym;
+  const ym = 0.08 * (ymax - ymin); ymin -= ym; ymax += ym;
 
   const sx = x => pad.l + ((x - xmin) / (xmax - xmin || 1)) * pw;
   const sy = y => pad.t + ph - ((y - ymin) / (ymax - ymin || 1)) * ph;
 
-  // 4-sided closed box + inward ticks (Nature Photonics style)
-  ctx.strokeStyle = '#3b4f78';
+  ctx.strokeStyle = '#334155';
   ctx.lineWidth = 1.1;
   ctx.strokeRect(pad.l, pad.t, pw, ph);
 
-  ctx.fillStyle = '#93a5c4';
+  ctx.fillStyle = '#94a3b8';
   ctx.font = '10.5px Arial, sans-serif';
   for (let i = 0; i <= 4; i++) {
     const tx = pad.l + (i / 4) * pw;
@@ -1030,14 +1404,14 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
     ctx.beginPath(); ctx.moveTo(tx, pad.t + ph); ctx.lineTo(tx, pad.t + ph - 5); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(tx, pad.t); ctx.lineTo(tx, pad.t + 5); ctx.stroke();
     ctx.textAlign = 'center';
-    ctx.fillText(vx.toFixed(Math.abs(xmax - xmin) < 1 ? 3 : 2), tx, h - 18);
+    ctx.fillText(vx.toFixed(Math.abs(xmax - xmin) < 0.8 ? 3 : 2), tx, h - 19);
 
     const ty = pad.t + ph - (i / 4) * ph;
     const vy = ymin + (i / 4) * (ymax - ymin);
     ctx.beginPath(); ctx.moveTo(pad.l, ty); ctx.lineTo(pad.l + 5, ty); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad.l + pw, ty); ctx.lineTo(pad.l + pw - 5, ty); ctx.stroke();
     ctx.textAlign = 'right';
-    ctx.fillText(vy.toFixed(Math.abs(ymax - ymin) < 2 ? 2 : 1), pad.l - 6, ty + 3.5);
+    ctx.fillText(vy.toFixed(Math.abs(ymax - ymin) < 2 ? 2 : 1), pad.l - 7, ty + 3.5);
   }
 
   if (vLineX !== null && vLineX >= xmin && vLineX <= xmax) {
@@ -1045,13 +1419,14 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = '#fb923c';
+    ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(vx, pad.t); ctx.lineTo(vx, pad.t + ph); ctx.stroke();
     ctx.restore();
   }
 
   seriesList.forEach((s, idx) => {
     ctx.strokeStyle = s.color || '#38bdf8';
-    ctx.lineWidth = s.width || 1.6;
+    ctx.lineWidth = s.width || 1.75;
     if (s.dashed) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
     ctx.beginPath();
     let started = false;
@@ -1067,14 +1442,14 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
       ctx.fillStyle = s.color || '#38bdf8';
       for (let i = 0; i < s.x.length; i++) {
         if (s.y[i] === null || !Number.isFinite(s.y[i])) continue;
-        ctx.beginPath(); ctx.arc(sx(s.x[i]), sy(s.y[i]), 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx(s.x[i]), sy(s.y[i]), 3.0, 0, Math.PI * 2); ctx.fill();
       }
     }
     if (s.label) {
       ctx.fillStyle = s.color;
       ctx.textAlign = 'left';
       ctx.font = 'bold 10.5px Arial';
-      ctx.fillText(s.label, pad.l + 10 + idx * 125, pad.t + 14);
+      ctx.fillText(s.label, pad.l + 10 + idx * 135, pad.t + 15);
     }
   });
 
@@ -1083,7 +1458,7 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
   ctx.font = '11px Arial';
   ctx.fillText(xLabel, pad.l + pw / 2, h - 4);
   ctx.save();
-  ctx.translate(13, pad.t + ph / 2);
+  ctx.translate(14, pad.t + ph / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillText(yLabel, 0, 0);
   ctx.restore();
@@ -1093,11 +1468,11 @@ function drawLinePlot(canvasId, seriesList, xLabel, yLabel, vLineX = null) {
 async function runManualMRR() {
   const cfg = readConfigFromForm();
   if (copilotSession) copilotSession.config = Object.assign(copilotSession.config || {}, cfg);
+  syncFormFromConfig(cfg);
+  setStageView('mrr');
   document.getElementById('spec-status').textContent = 'Solving 2D FEM + CMT...';
   const r = await fetch('/api/design_mrr', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cfg)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
   });
   const data = await r.json();
   if (data.error) {
@@ -1113,26 +1488,30 @@ function renderMrrResult(res) {
   const m = res.metrics;
   const cc = res.critical_coupling;
   const wBar = document.getElementById('wl-warning-bar');
-  if (wBar) {
-    const warns = res.wavelength_warnings || [];
-    if (warns.length > 0) {
-      wBar.style.display = 'block';
-      wBar.textContent = '⚠ ' + warns.join(' | ');
-    } else {
-      wBar.style.display = 'none';
-    }
+  const warns = res.wavelength_warnings || [];
+  if (warns.length > 0) {
+    wBar.style.display = 'block';
+    wBar.textContent = '⚠ ' + warns.join(' | ');
+  } else {
+    wBar.style.display = 'none';
   }
+
   document.getElementById('kpi-fsr').textContent = `${m.FSR_GHz.toFixed(2)} GHz`;
   document.getElementById('kpi-fsr-nm').textContent = `${m.FSR_nm.toFixed(3)} nm`;
+  document.getElementById('kpi-loss').textContent = `${m.alpha_loss_db_per_cm.toFixed(2)} dB/cm`;
+  document.getElementById('kpi-qint').textContent = `Q_int ${Math.round(m.Q_int).toLocaleString()}`;
   document.getElementById('kpi-ql').textContent = Math.round(m.Q_loaded).toLocaleString();
   document.getElementById('kpi-fwhm').textContent = `FWHM ${m.FWHM_pm.toFixed(2)} pm`;
-  document.getElementById('kpi-qint').textContent = Math.round(m.Q_int).toLocaleString();
-  document.getElementById('kpi-qext').textContent = `Q_ext ${Math.round(m.Q_ext_thru).toLocaleString()}`;
   document.getElementById('kpi-er').textContent = `${m.ER_thru_dB.toFixed(1)} dB`;
   document.getElementById('kpi-regime').textContent = cc.regime;
   document.getElementById('kpi-cc').textContent = `${cc.recommended_value} ${cc.unit}`;
-  document.getElementById('kpi-shift').textContent = `${(m.tuning_shift_pm || 0).toFixed(1)} pm`;
-  document.getElementById('kpi-eo-eff').textContent = `n_eff=${m.neff_ring.toFixed(4)} | n_g=${m.ng_ring.toFixed(4)}`;
+  document.getElementById('kpi-eo-eff').textContent = `n_eff=${m.neff_ring.toFixed(4)} · n_g=${m.ng_ring.toFixed(4)}`;
+  document.getElementById('kpi-qext').textContent = `Q_ext = ${Math.round(m.Q_ext_thru).toLocaleString()}`;
+  document.getElementById('kpi-shift').textContent = `Tuning Δλ = ${(m.tuning_shift_pm || 0).toFixed(1)} pm`;
+
+  // Sync n_g into spectrum fitter for convenience!
+  document.getElementById('fit-ng').value = m.ng_ring.toFixed(4);
+  document.getElementById('fit-lrt').value = m.roundtrip_length_um.toFixed(2);
 
   const sp = res.spectrum;
   const series = [{ x: sp.wavelength_nm, y: sp.thru_dB, color: '#38bdf8', label: 'Through [dB]' }];
@@ -1143,7 +1522,8 @@ function renderMrrResult(res) {
 
   if (res.coupler_curve) {
     const c = res.coupler_curve;
-    document.getElementById('sweep-plot-title').textContent = 'Coupler Synthesis Curve';
+    document.getElementById('sweep-plot-title').textContent = 'Coupler Critical-Coupling Synthesis';
+    document.getElementById('sweep-sub').textContent = `Target: ${cc.recommended_value} ${cc.unit}`;
     drawLinePlot(
       'cv-coupler',
       [{ x: c.x_values, y: c.log10_Q_ext, color: '#34d399', label: 'log10(Q_ext)' }],
@@ -1157,7 +1537,7 @@ function renderMrrResult(res) {
 
 function drawMrrSweepPlot(sw) {
   document.getElementById('sweep-plot-title').textContent = `Sweep: ${sw.param_name} [${sw.unit}]`;
-  document.getElementById('sweep-sub').textContent = `Peak ER = ${Math.max(...sw.ER_thru_dB).toFixed(1)} dB`;
+  document.getElementById('sweep-sub').textContent = `Best ER = ${Math.max(...sw.ER_thru_dB).toFixed(1)} dB`;
   drawLinePlot(
     'cv-coupler',
     [{ x: sw.values, y: sw.ER_thru_dB, color: '#fb923c', dots: true, label: 'Extinction Ratio [dB]' }],
@@ -1176,220 +1556,65 @@ function renderSchematicsSVG(cfg) {
 
   let ringSvg = '';
   if (isVernier) {
-    ringSvg = `<circle cx="155" cy="85" r="34" fill="none" stroke="#38bdf8" stroke-width="5"/>
-               <circle cx="231" cy="85" r="36" fill="none" stroke="#a78bfa" stroke-width="5"/>
-               <line x1="35" y1="127" x2="345" y2="127" stroke="#34d399" stroke-width="4"/>
-               <line x1="35" y1="41" x2="345" y2="41" stroke="#fb923c" stroke-width="4"/>`;
+    ringSvg = `<circle cx="150" cy="60" r="26" fill="none" stroke="#38bdf8" stroke-width="4.5"/>
+               <circle cx="212" cy="60" r="28" fill="none" stroke="#a78bfa" stroke-width="4.5"/>
+               <line x1="35" y1="95" x2="335" y2="95" stroke="#34d399" stroke-width="3.5"/>
+               <line x1="35" y1="24" x2="335" y2="24" stroke="#fb923c" stroke-width="3.5"/>`;
   } else if (isRace) {
-    ringSvg = `<rect x="125" y="48" width="130" height="74" rx="37" fill="none" stroke="#38bdf8" stroke-width="5"/>
-               <line x1="35" y1="130" x2="345" y2="130" stroke="#34d399" stroke-width="4"/>` +
-               (is4 ? `<line x1="35" y1="40" x2="345" y2="40" stroke="#fb923c" stroke-width="4"/>` : '');
+    ringSvg = `<rect x="115" y="32" width="135" height="56" rx="28" fill="none" stroke="#38bdf8" stroke-width="4.5"/>
+               <line x1="35" y1="96" x2="335" y2="96" stroke="#34d399" stroke-width="3.5"/>` +
+               (is4 ? `<line x1="35" y1="24" x2="335" y2="24" stroke="#fb923c" stroke-width="3.5"/>` : '');
   } else if (isPulley) {
-    ringSvg = `<circle cx="190" cy="85" r="42" fill="none" stroke="#38bdf8" stroke-width="5"/>
-               <path d="M 40 142 L 135 142 Q 190 122 245 142 L 340 142" fill="none" stroke="#34d399" stroke-width="4"/>` +
-               (is4 ? `<path d="M 40 28 L 135 28 Q 190 48 245 28 L 340 28" fill="none" stroke="#fb923c" stroke-width="4"/>` : '');
+    ringSvg = `<circle cx="185" cy="60" r="32" fill="none" stroke="#38bdf8" stroke-width="4.5"/>
+               <path d="M 40 104 L 132 104 Q 185 88 238 104 L 330 104" fill="none" stroke="#34d399" stroke-width="3.5"/>` +
+               (is4 ? `<path d="M 40 18 L 132 18 Q 185 34 238 18 L 330 18" fill="none" stroke="#fb923c" stroke-width="3.5"/>` : '');
   } else {
-    ringSvg = `<circle cx="190" cy="85" r="42" fill="none" stroke="#38bdf8" stroke-width="5"/>
-               <line x1="35" y1="134" x2="345" y2="134" stroke="#34d399" stroke-width="4"/>` +
-               (is4 ? `<line x1="35" y1="36" x2="345" y2="36" stroke="#fb923c" stroke-width="4"/>` : '');
+    ringSvg = `<circle cx="185" cy="60" r="32" fill="none" stroke="#38bdf8" stroke-width="4.5"/>
+               <line x1="35" y1="99" x2="335" y2="99" stroke="#34d399" stroke-width="3.5"/>` +
+               (is4 ? `<line x1="35" y1="21" x2="335" y2="21" stroke="#fb923c" stroke-width="3.5"/>` : '');
   }
-  document.getElementById('svg-topdown').innerHTML = `
-    <svg width="380" height="168" viewBox="0 0 380 168">
-      <rect width="380" height="168" rx="6" fill="#080d18"/>
+
+  const topSvgHtml = `
+    <svg width="370" height="122" viewBox="0 0 370 122">
+      <rect width="370" height="122" rx="8" fill="#070b14"/>
       ${ringSvg}
-      <text x="12" y="158" fill="#93a5c4" font-size="11" font-family="monospace">${t} | R=${cfg.ring_radius_um} um | gap=${Math.round((cfg.gap_thru_um||0.25)*1000)} nm</text>
+      <text x="12" y="114" fill="#94a3b8" font-size="10.5" font-family="monospace">${t} · R=${cfg.ring_radius_um} µm · gap=${Math.round((cfg.gap_thru_um||0.25)*1000)} nm</text>
     </svg>`;
+  const elTop = document.getElementById('svg-topdown');
+  if (elTop) elTop.innerHTML = topSvgHtml;
 
   const hSlabRatio = Math.min(0.75, (cfg.slab_height_um || 0) / Math.max(cfg.film_height_um || 0.4, 0.05));
-  const coreH = 54, slabH = Math.round(coreH * hSlabRatio);
-  document.getElementById('svg-xsec').innerHTML = `
-    <svg width="380" height="168" viewBox="0 0 380 168">
-      <rect width="380" height="168" rx="6" fill="#080d18"/>
-      <rect x="25" y="112" width="330" height="38" fill="#1e293b"/>
-      <rect x="25" y="24" width="330" height="88" fill="${cfg.top_clad_material==='Air'?'#0b1324':'#172554'}" opacity="0.7"/>
-      ${slabH > 0 ? `<rect x="40" y="${112 - slabH}" width="300" height="${slabH}" fill="#0284c7"/>` : ''}
-      <polygon points="135,112 245,112 236,${112 - coreH} 144,${112 - coreH}" fill="#38bdf8" stroke="#bae6fd" stroke-width="1"/>
-      <text x="190" y="${112 - coreH/2 + 4}" text-anchor="middle" fill="#080d18" font-weight="bold" font-size="11">${cfg.core_material}</text>
-      <text x="12" y="158" fill="#93a5c4" font-size="11" font-family="monospace">W=${cfg.ring_width_um} um | H=${Math.round((cfg.film_height_um||0.4)*1000)} nm | slab=${Math.round((cfg.slab_height_um||0)*1000)} nm | ${cfg.sidewall_deg}°</text>
+  const coreH = 44, slabH = Math.round(coreH * hSlabRatio);
+  const xsecSvgHtml = `
+    <svg width="370" height="126" viewBox="0 0 370 126">
+      <rect width="370" height="126" rx="8" fill="#070b14"/>
+      <rect x="20" y="84" width="330" height="28" fill="#1e293b"/>
+      <rect x="20" y="16" width="330" height="68" fill="${cfg.top_clad_material==='Air'?'#0b1324':'#172554'}" opacity="0.72"/>
+      ${slabH > 0 ? `<rect x="35" y="${84 - slabH}" width="300" height="${slabH}" fill="#0284c7"/>` : ''}
+      <polygon points="135,84 235,84 227,${84 - coreH} 143,${84 - coreH}" fill="#38bdf8" stroke="#bae6fd" stroke-width="1"/>
+      <text x="185" y="${84 - coreH/2 + 4}" text-anchor="middle" fill="#070b14" font-weight="bold" font-size="11">${cfg.core_material}</text>
+      <text x="12" y="118" fill="#94a3b8" font-size="10.5" font-family="monospace">W=${cfg.ring_width_um} µm · H=${Math.round((cfg.film_height_um||0.4)*1000)} nm · slab=${Math.round((cfg.slab_height_um||0)*1000)} nm · ${cfg.top_clad_material}/${cfg.clad_material||'SiO2'}</text>
     </svg>`;
-}
-
-// ==================== BIDIRECTIONAL GDSII UPLOAD & CREATOR ====================
-function handleGdsFileSelect(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const b64 = reader.result.split(',')[1] || reader.result;
-    const r = await fetch('/api/upload_gds', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: file.name, content_b64: b64, session: copilotSession })
-    });
-    const data = await r.json();
-    if (data.error) {
-      alert('GDS Parse Error: ' + data.error);
-      return;
-    }
-    copilotSession = data.session;
-    appendChatBubble('assistant', data.assistant_message);
-    renderChips(data.chips);
-    syncFormFromConfig(copilotSession.config);
-    switchTab('tab-gds');
-    setGdsView(data.gds_info);
-  };
-  reader.readAsDataURL(file);
-}
-
-function setGdsView(gdsInfo) {
-  currentGdsView = gdsInfo;
-  gdsCam.hiddenLayers = {};
-  const ext = gdsInfo.extracted_geometry;
-  document.getElementById('gds-extracted-box').innerHTML = `
-    <div style="color:#e2e8f0;line-height:1.55;">
-      <strong>File</strong>: <code>${gdsInfo.file_name}</code> (Cell: <code>${gdsInfo.cell_name}</code>, Core Layer: <code>${gdsInfo.selected_core_layer.join('/')}</code>)<br/>
-      <strong>Detected</strong>: <span style="color:#38bdf8;font-weight:700;">${ext.topology_display}</span> (${ext.ports_detected}-Port)<br/>
-      <strong>Polygon Measurements</strong>: R = <code>${ext.ring_radius_um} um</code> | W_ring = <code>${ext.ring_width_um} um</code> | W_bus = <code>${ext.bus_width_um} um</code> | gap_thru = <strong style="color:#34d399;">${(ext.gap_thru_um*1000).toFixed(1)} nm</strong>
-      ${ext.straight_length_um > 0 ? ` | L_s = <code>${ext.straight_length_um} um</code>` : ''}
-      ${ext.topology.includes('pulley') ? ` | theta = <code>${ext.pulley_angle_thru_deg} deg</code>` : ''}
-    </div>`;
-
-  const pills = document.getElementById('gds-layer-pills');
-  pills.innerHTML = '';
-  gdsInfo.viewer_layers.forEach(vl => {
-    const key = `${vl.layer}/${vl.datatype}`;
-    const col = LAYER_COLORS[key] || '#a78bfa';
-    const b = document.createElement('button');
-    b.className = 'mini-btn';
-    b.style.borderColor = col;
-    b.style.color = col;
-    b.textContent = `L ${key}`;
-    b.onclick = () => {
-      gdsCam.hiddenLayers[key] = !gdsCam.hiddenLayers[key];
-      b.style.opacity = gdsCam.hiddenLayers[key] ? '0.35' : '1.0';
-      drawGdsCanvas();
-    };
-    pills.appendChild(b);
-  });
-  resetGdsCamera();
-}
-
-function showGdsExportResult(exp) {
-  const dl = document.getElementById('gds-download-links');
-  dl.innerHTML = `
-    <a class="btn green" href="${exp.gds_download_url}" download>⬇ Download .GDS Mask</a>
-    <a class="btn amber" href="${exp.lyp_download_url}" download>⬇ Download KLayout .LYP</a>
-    <span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">Saved: ${exp.gds_path || exp.saved_path}</span>`;
-  if (exp.gds_view) setGdsView(exp.gds_view);
-}
-
-async function createSingleGdsUI() {
-  const cfg = readConfigFromForm();
-  const r = await fetch('/api/export_gds', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
-  });
-  const data = await r.json();
-  if (!data.error) showGdsExportResult(data);
-}
-
-async function createSweepArrayGdsUI() {
-  const cfg = readConfigFromForm();
-  const payload = {
-    config: cfg,
-    param_name: document.getElementById('gds-sw-param').value,
-    v_min: parseFloat(document.getElementById('gds-sw-min').value),
-    v_max: parseFloat(document.getElementById('gds-sw-max').value),
-    num_devices: parseInt(document.getElementById('gds-sw-n').value, 10)
-  };
-  const r = await fetch('/api/export_sweep_gds', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  });
-  const data = await r.json();
-  if (!data.error) showGdsExportResult(data);
-}
-
-function resetGdsCamera() {
-  gdsCam.scale = 1.0; gdsCam.offsetX = 0; gdsCam.offsetY = 0;
-  drawGdsCanvas();
-}
-
-function drawGdsCanvas() {
-  if (!currentGdsView) return;
-  const { cv, ctx, w, h } = setupCanvas('cv-gds');
-  ctx.fillStyle = '#060a12';
-  ctx.fillRect(0, 0, w, h);
-
-  const [xmin, ymin, xmax, ymax] = currentGdsView.bbox_um;
-  const spanX = Math.max(xmax - xmin, 1.0), spanY = Math.max(ymax - ymin, 1.0);
-  const baseScale = 0.84 * Math.min(w / spanX, h / spanY) * gdsCam.scale;
-  const cx = 0.5 * (xmin + xmax), cy = 0.5 * (ymin + ymax);
-  const tx = x => w / 2 + (x - cx) * baseScale + gdsCam.offsetX;
-  const ty = y => h / 2 - (y - cy) * baseScale + gdsCam.offsetY;
-
-  currentGdsView.viewer_layers.forEach(vl => {
-    const key = `${vl.layer}/${vl.datatype}`;
-    if (gdsCam.hiddenLayers[key]) return;
-    const col = LAYER_COLORS[key] || '#a78bfa';
-    ctx.fillStyle = col + '44';
-    ctx.strokeStyle = col;
-    ctx.lineWidth = vl.is_core ? 1.35 : 0.9;
-    vl.polygons.forEach(pts => {
-      if (pts.length < 3) return;
-      ctx.beginPath();
-      ctx.moveTo(tx(pts[0][0]), ty(pts[0][1]));
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(tx(pts[i][0]), ty(pts[i][1]));
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    });
-  });
-
-  // Draw red gap measurement calipers
-  (currentGdsView.gap_markers || []).forEach(gm => {
-    const x1 = tx(gm.ring_pt[0]), y1 = ty(gm.ring_pt[1]);
-    const x2 = tx(gm.bus_pt[0]), y2 = ty(gm.bus_pt[1]);
-    ctx.strokeStyle = '#f87171';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    ctx.fillStyle = '#fecaca';
-    ctx.font = 'bold 11px monospace';
-    ctx.fillText(`gap = ${(gm.gap_um * 1000).toFixed(1)} nm`, 0.5 * (x1 + x2) + 8, 0.5 * (y1 + y2) - 5);
+  ['svg-xsec', 'svg-xsec-overview'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = xsecSvgHtml;
   });
 }
 
-// Mouse pan & zoom on GDS canvas
-(function attachGdsEvents() {
-  const cv = document.getElementById('cv-gds');
-  cv.addEventListener('wheel', e => {
-    e.preventDefault();
-    gdsCam.scale *= (e.deltaY < 0 ? 1.18 : 0.85);
-    gdsCam.scale = Math.max(0.2, Math.min(40, gdsCam.scale));
-    drawGdsCanvas();
-  }, { passive: false });
-  cv.addEventListener('mousedown', e => { gdsCam.dragging = true; gdsCam.lastX = e.clientX; gdsCam.lastY = e.clientY; });
-  window.addEventListener('mouseup', () => { gdsCam.dragging = false; });
-  window.addEventListener('mousemove', e => {
-    if (!gdsCam.dragging) return;
-    gdsCam.offsetX += (e.clientX - gdsCam.lastX);
-    gdsCam.offsetY += (e.clientY - gdsCam.lastY);
-    gdsCam.lastX = e.clientX; gdsCam.lastY = e.clientY;
-    drawGdsCanvas();
-  });
-})();
-
-// ==================== TAB 3: 2D EIGENMODE & WIDTH CUTOFF ====================
+// ==================== 2D EIGENMODE & WIDTH CUTOFF ====================
 async function solve2DModesUI() {
   const cfg = readConfigFromForm();
   const payload = {
     core_material: cfg.core_material,
     clad_material: cfg.clad_material,
     top_clad_material: cfg.top_clad_material,
-    w_bottom_um: parseFloat(document.getElementById('mode-w').value) || cfg.ring_width_um,
+    w_bottom_um: cfg.ring_width_um,
     h_film_um: cfg.film_height_um,
     h_slab_um: cfg.slab_height_um,
     sidewall_deg: cfg.sidewall_deg,
     wavelength_nm: cfg.wavelength_nm,
-    bend_radius_um: parseFloat(document.getElementById('mode-r').value) || 0,
-    solver_backend: document.getElementById('mode-backend').value,
+    bend_radius_um: 0,
+    solver_backend: 'fem',
     num_modes: 4
   };
   const r = await fetch('/api/solve_mode', {
@@ -1424,12 +1649,12 @@ function renderSelectedMode() {
   const m = lastModesData.modes[selectedModeIdx];
   const comp = document.getElementById('mode-comp').value;
   const grid = m[comp];
-  document.getElementById('mode-meta').textContent = `n_eff = ${m.n_eff_real.toFixed(5)} | TE ${(m.te_fraction*100).toFixed(1)}%`;
+  document.getElementById('mode-meta').textContent = `n_eff = ${m.n_eff_real.toFixed(5)} (${(m.te_fraction*100).toFixed(0)}% TE)`;
 
   const { ctx, w, h } = setupCanvas('cv-mode');
   ctx.fillStyle = '#050811';
   ctx.fillRect(0, 0, w, h);
-  const pad = { l: 42, r: 14, t: 14, b: 28 };
+  const pad = { l: 36, r: 14, t: 14, b: 24 };
   const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
   const ny = grid.length, nx = grid[0].length;
   let vmax = 1e-9;
@@ -1451,8 +1676,8 @@ function renderSelectedMode() {
 
   const xs = m.x_um, ys = m.y_um;
   const xmin = xs[0], xmax = xs[xs.length - 1], ymin = ys[0], ymax = ys[ys.length - 1];
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.88)';
+  ctx.lineWidth = 1.4;
   (lastModesData.polygon_outlines_um || []).forEach(poly => {
     ctx.beginPath();
     poly.forEach(([px, py], idx) => {
@@ -1465,48 +1690,175 @@ function renderSelectedMode() {
   });
 }
 
-async function runWidthSweepUI() {
-  const cfg = readConfigFromForm();
-  const payload = {
-    core_material: cfg.core_material,
-    clad_material: cfg.clad_material,
-    top_clad_material: cfg.top_clad_material,
-    h_film_um: cfg.film_height_um,
-    h_slab_um: cfg.slab_height_um,
-    sidewall_deg: cfg.sidewall_deg,
-    wavelength_nm: cfg.wavelength_nm,
-    polarization: cfg.polarization,
-    w_min_um: parseFloat(document.getElementById('sw-wmin').value) || 0.5,
-    w_max_um: parseFloat(document.getElementById('sw-wmax').value) || 2.0,
-    num_points: 7
-  };
-  document.getElementById('width-cutoff-badge').textContent = 'Sweeping widths...';
-  const r = await fetch('/api/sweep_width', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  });
-  const data = await r.json();
-  if (!data.error) drawWidthSweepPlot(data);
-}
-
 function drawWidthSweepPlot(sw) {
-  document.getElementById('width-cutoff-badge').textContent = `SM Max W = ${sw.single_mode_max_width_um} um`;
+  document.getElementById('width-cutoff-badge').textContent = `Cutoff W_max = ${sw.single_mode_max_width_um} µm`;
+  document.getElementById('mode-kpi-sm').textContent = `${sw.single_mode_max_width_um} µm`;
+  document.getElementById('mode-kpi-wbus').textContent = `${sw.recommended_bus_width_um} µm`;
+  document.getElementById('mode-kpi-wring').textContent = `${sw.recommended_ring_width_um} µm`;
+
+  const idx = Math.min(sw.widths_um.length - 1, Math.max(0, Math.floor(sw.widths_um.length / 2)));
+  document.getElementById('mode-kpi-neff').textContent = `n_eff ${sw.neff_fundamental[idx].toFixed(4)}`;
+  document.getElementById('mode-kpi-ng').textContent = `n_g = ${sw.ng_fundamental[idx].toFixed(4)}`;
+  document.getElementById('fit-ng').value = sw.ng_fundamental[idx].toFixed(4);
+
   const series = [
     { x: sw.widths_um, y: sw.neff_fundamental, color: '#38bdf8', dots: true, label: 'n_eff (Fund.)' },
     { x: sw.widths_um, y: sw.ng_fundamental, color: '#34d399', dots: true, label: 'n_g (Group)' }
   ];
   if (sw.neff_higher_order.some(v => v !== null)) {
-    series.push({ x: sw.widths_um, y: sw.neff_higher_order, color: '#f87171', dashed: true, dots: true, label: 'TE1/TM1 Cutoff' });
+    series.push({ x: sw.widths_um, y: sw.neff_higher_order, color: '#f87171', dashed: true, dots: true, label: 'Higher-Order Cutoff' });
   }
-  drawLinePlot('cv-width-sweep', series, 'Waveguide Bottom Width W [um]', 'Effective / Group Index', sw.single_mode_max_width_um);
+  drawLinePlot('cv-width-sweep', series, 'Waveguide Bottom Width W [µm]', 'Effective / Group Index', sw.single_mode_max_width_um);
 }
 
-// ==================== TAB 4: LAB SPECTRUM CMT FITTER ====================
+// ==================== GDSII UPLOAD & EXPORT ====================
+function handleGdsFileSelect(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = reader.result.split(',')[1] || reader.result;
+    const r = await fetch('/api/upload_gds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, content_b64: b64, session: copilotSession, lang: currentLang })
+    });
+    const data = await r.json();
+    if (data.error) { alert('GDS Parse Error: ' + data.error); return; }
+    copilotSession = data.session;
+    appendChatBubble('assistant', data.assistant_message);
+    renderChips(data.chips);
+    syncFormFromConfig(copilotSession.config);
+    updateStepper(data.wizard_step || 4);
+    setStageView('gds');
+    setGdsView(data.gds_info);
+  };
+  reader.readAsDataURL(file);
+}
+
+function setGdsView(gdsInfo) {
+  currentGdsView = gdsInfo;
+  gdsCam.hiddenLayers = {};
+  const ext = gdsInfo.extracted_geometry;
+  document.getElementById('gds-extracted-box').innerHTML = `
+    <div style="line-height:1.6;">
+      <strong>${currentLang === 'zh' ? '文件' : 'File'}</strong>: <code>${gdsInfo.file_name}</code> (Cell: <code>${gdsInfo.cell_name}</code>, Layer: <code>${gdsInfo.selected_core_layer.join('/')}</code>) &nbsp;|&nbsp;
+      <strong>${currentLang === 'zh' ? '识别拓扑' : 'Detected'}</strong>: <span style="color:#38bdf8;font-weight:700;">${ext.topology_display}</span> (${ext.ports_detected}-Port)<br/>
+      <strong>${currentLang === 'zh' ? '多边形测量参数' : 'Measured Polygons'}</strong>: R = <code>${ext.ring_radius_um} µm</code> · W_ring = <code>${ext.ring_width_um} µm</code> · W_bus = <code>${ext.bus_width_um} µm</code> · gap = <strong style="color:#34d399;">${(ext.gap_thru_um*1000).toFixed(1)} nm</strong>
+      ${ext.straight_length_um > 0 ? ` · L_s = <code>${ext.straight_length_um} µm</code>` : ''}
+      ${ext.topology.includes('pulley') ? ` · θ = <code>${ext.pulley_angle_thru_deg}°</code>` : ''}
+    </div>`;
+
+  const pills = document.getElementById('gds-layer-pills');
+  pills.innerHTML = '';
+  gdsInfo.viewer_layers.forEach(vl => {
+    const key = `${vl.layer}/${vl.datatype}`;
+    const col = LAYER_COLORS[key] || '#a78bfa';
+    const b = document.createElement('button');
+    b.className = 'btn sm';
+    b.style.borderColor = col; b.style.color = col; b.style.padding = '3px 8px';
+    b.textContent = `L ${key}`;
+    b.onclick = () => {
+      gdsCam.hiddenLayers[key] = !gdsCam.hiddenLayers[key];
+      b.style.opacity = gdsCam.hiddenLayers[key] ? '0.35' : '1.0';
+      drawGdsCanvas();
+    };
+    pills.appendChild(b);
+  });
+  resetGdsCamera();
+}
+
+function showGdsExportResult(exp) {
+  const dl = document.getElementById('gds-download-links');
+  dl.innerHTML = `
+    <a class="btn green sm" href="${exp.gds_download_url}" download>⬇ ${currentLang === 'zh' ? '下载 .GDS' : 'Download .GDS'}</a>
+    <a class="btn amber sm" href="${exp.lyp_download_url}" download>⬇ ${currentLang === 'zh' ? '下载 KLayout .LYP' : 'Download KLayout .LYP'}</a>`;
+  if (exp.gds_view) setGdsView(exp.gds_view);
+}
+
+async function createSingleGdsUI() {
+  const cfg = readConfigFromForm();
+  const r = await fetch('/api/export_gds', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+  });
+  const data = await r.json();
+  if (!data.error) { setStageView('gds'); showGdsExportResult(data); }
+}
+
+async function createSweepArrayGdsUI() {
+  const cfg = readConfigFromForm();
+  const payload = { config: cfg, param_name: 'gap_thru_um', v_min: Math.max(0.10, cfg.gap_thru_um - 0.06), v_max: cfg.gap_thru_um + 0.06, num_devices: 5 };
+  const r = await fetch('/api/export_sweep_gds', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await r.json();
+  if (!data.error) { setStageView('gds'); showGdsExportResult(data); }
+}
+
+function resetGdsCamera() { gdsCam.scale = 1.0; gdsCam.offsetX = 0; gdsCam.offsetY = 0; drawGdsCanvas(); }
+
+function drawGdsCanvas() {
+  if (!currentGdsView) return;
+  const { ctx, w, h } = setupCanvas('cv-gds');
+  ctx.fillStyle = '#060a12';
+  ctx.fillRect(0, 0, w, h);
+
+  const [xmin, ymin, xmax, ymax] = currentGdsView.bbox_um;
+  const spanX = Math.max(xmax - xmin, 1.0), spanY = Math.max(ymax - ymin, 1.0);
+  const baseScale = 0.84 * Math.min(w / spanX, h / spanY) * gdsCam.scale;
+  const cx = 0.5 * (xmin + xmax), cy = 0.5 * (ymin + ymax);
+  const tx = x => w / 2 + (x - cx) * baseScale + gdsCam.offsetX;
+  const ty = y => h / 2 - (y - cy) * baseScale + gdsCam.offsetY;
+
+  currentGdsView.viewer_layers.forEach(vl => {
+    const key = `${vl.layer}/${vl.datatype}`;
+    if (gdsCam.hiddenLayers[key]) return;
+    const col = LAYER_COLORS[key] || '#a78bfa';
+    ctx.fillStyle = col + '40';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = vl.is_core ? 1.4 : 0.9;
+    vl.polygons.forEach(pts => {
+      if (pts.length < 3) return;
+      ctx.beginPath();
+      ctx.moveTo(tx(pts[0][0]), ty(pts[0][1]));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(tx(pts[i][0]), ty(pts[i][1]));
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    });
+  });
+
+  (currentGdsView.gap_markers || []).forEach(gm => {
+    const x1 = tx(gm.ring_pt[0]), y1 = ty(gm.ring_pt[1]);
+    const x2 = tx(gm.bus_pt[0]), y2 = ty(gm.bus_pt[1]);
+    ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.fillStyle = '#fecaca'; ctx.font = 'bold 11px monospace';
+    ctx.fillText(`gap = ${(gm.gap_um * 1000).toFixed(1)} nm`, 0.5 * (x1 + x2) + 8, 0.5 * (y1 + y2) - 5);
+  });
+}
+
+(function attachGdsEvents() {
+  const cv = document.getElementById('cv-gds');
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    gdsCam.scale = Math.max(0.2, Math.min(40, gdsCam.scale * (e.deltaY < 0 ? 1.18 : 0.85)));
+    drawGdsCanvas();
+  }, { passive: false });
+  cv.addEventListener('mousedown', e => { gdsCam.dragging = true; gdsCam.lastX = e.clientX; gdsCam.lastY = e.clientY; });
+  window.addEventListener('mouseup', () => { gdsCam.dragging = false; });
+  window.addEventListener('mousemove', e => {
+    if (!gdsCam.dragging) return;
+    gdsCam.offsetX += (e.clientX - gdsCam.lastX); gdsCam.offsetY += (e.clientY - gdsCam.lastY);
+    gdsCam.lastX = e.clientX; gdsCam.lastY = e.clientY;
+    drawGdsCanvas();
+  });
+})();
+
+// ==================== STAGE 5: LAB SPECTRUM LOSS (dB/cm) & Q FITTER ====================
 async function loadDemoSpectrum(kind) {
+  setStageView('fit');
   const r = await fetch(`/api/demo_spectrum?kind=${kind}`);
   labSpectrumData = await r.json();
   document.getElementById('fit-lrt').value = labSpectrumData.ring_length_um || 250;
-  if (kind === 'multi_fsr') document.getElementById('fit-model').value = 'multi_fsr';
-  else document.getElementById('fit-model').value = 'auto';
+  document.getElementById('fit-model').value = (kind === 'multi_fsr') ? 'multi_fsr' : 'auto';
   await runCmtFitUI();
 }
 
@@ -1517,15 +1869,19 @@ function loadLabCsvFile(file) {
     const lines = reader.result.split(/\r?\n/);
     const wl = [], tr = [];
     for (const ln of lines) {
+      if (!ln.trim() || ln.trim().startsWith('#')) continue;
       const parts = ln.trim().split(/[,\s;]+/);
       if (parts.length >= 2) {
         const x = parseFloat(parts[0]), y = parseFloat(parts[1]);
         if (Number.isFinite(x) && Number.isFinite(y)) { wl.push(x); tr.push(y); }
       }
     }
-    if (wl.length > 10) {
+    if (wl.length >= 10) {
       labSpectrumData = { wavelength_nm: wl, transmission: tr };
+      setStageView('fit');
       await runCmtFitUI();
+    } else {
+      alert('Could not parse >=10 numeric (wavelength_nm, transmission) rows from file.');
     }
   };
   reader.readAsText(file);
@@ -1538,48 +1894,114 @@ async function runCmtFitUI() {
     transmission: labSpectrumData.transmission,
     model_type: document.getElementById('fit-model').value,
     known_regime: document.getElementById('fit-regime').value,
+    ng_assumed: parseFloat(document.getElementById('fit-ng').value) || 2.10,
     ring_length_um: parseFloat(document.getElementById('fit-lrt').value) || 250
   };
   const r = await fetch('/api/fit_spectrum', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   });
   const data = await r.json();
-  if (data.error) return;
+  if (data.error) {
+    document.getElementById('fit-results-box').textContent = 'Fit Error: ' + data.error;
+    return;
+  }
+
   const box = document.getElementById('fit-results-box');
+  const useBtn = document.getElementById('btn-use-extracted-loss');
+
   if (data.mode === 'multi_fsr') {
     const res = data.result;
-    box.innerHTML = `<strong>Multi-FSR Group Index Fit</strong><br/>FSR = ${res.mean_fsr_ghz.toFixed(2)} GHz (${res.mean_fsr_nm.toFixed(3)} nm)<br/>Extracted n_g = <strong>${res.ng_extracted.toFixed(4)}</strong><br/>Mean Q_loaded = ${Math.round(res.mean_Q_loaded).toLocaleString()}`;
-    drawLinePlot('cv-fit', [{ x: labSpectrumData.wavelength_nm, y: labSpectrumData.transmission, color: '#38bdf8', label: 'Measured Broadband' }], 'Wavelength [nm]', 'Normalized Transmission');
+    lastExtractedLossDbCm = res.alpha_loss_db_per_cm;
+    if (res.ng_extracted) document.getElementById('fit-ng').value = res.ng_extracted.toFixed(4);
+    document.getElementById('fit-kpi-loss').textContent = `${(res.alpha_loss_db_per_cm || 0).toFixed(3)} dB/cm`;
+    document.getElementById('fit-kpi-loss-branches').textContent = `Under ${res.alpha_loss_under_db_per_cm} / Over ${res.alpha_loss_over_db_per_cm}`;
+    document.getElementById('fit-kpi-qint').textContent = Math.round(res.mean_Q_int || 0).toLocaleString();
+    document.getElementById('fit-kpi-rtloss').textContent = `Auto n_g = ${(res.ng_extracted || 0).toFixed(4)}`;
+    document.getElementById('fit-kpi-ql').textContent = Math.round(res.mean_Q_loaded || 0).toLocaleString();
+    document.getElementById('fit-kpi-fwhm').textContent = `FSR = ${res.mean_fsr_ghz.toFixed(2)} GHz`;
+    document.getElementById('fit-kpi-split').textContent = `${res.num_resonances} Peaks`;
+    document.getElementById('fit-kpi-r2').textContent = `FSR = ${res.mean_fsr_nm.toFixed(3)} nm`;
+
+    box.innerHTML = currentLang === 'zh'
+      ? `<strong>多谐振峰自洽提取</strong>：由 FSR 测得群折射率 <code>n_g = ${(res.ng_extracted||0).toFixed(4)}</code> + <code>Q_int = ${Math.round(res.mean_Q_int||0).toLocaleString()}</code> ⇒ 波导传播损耗 <strong><code>α = ${(res.alpha_loss_db_per_cm||0).toFixed(3)} dB/cm</code></strong>（单圈损耗 <code>${(res.roundtrip_loss_db||0).toFixed(4)} dB</code>）。`
+      : `<strong>Self-Contained Multi-FSR Extraction</strong>: Measured <code>n_g = ${(res.ng_extracted||0).toFixed(4)}</code> from FSR + <code>Q_int = ${Math.round(res.mean_Q_int||0).toLocaleString()}</code> ⇒ Waveguide Loss <strong><code>α = ${(res.alpha_loss_db_per_cm||0).toFixed(3)} dB/cm</code></strong> (Round-trip loss <code>${(res.roundtrip_loss_db||0).toFixed(4)} dB</code>).`;
+    useBtn.style.display = 'inline-flex';
+    useBtn.textContent = currentLang === 'zh'
+      ? `🎯 用 α = ${(res.alpha_loss_db_per_cm||0).toFixed(2)} dB/cm 设计新微环 →`
+      : `🎯 Design Ring with α = ${(res.alpha_loss_db_per_cm||0).toFixed(2)} dB/cm →`;
+
+    const yMeas = res.resonances && labSpectrumData.transmission.some(v => v < -0.25)
+      ? labSpectrumData.transmission.map(v => Math.pow(10, v / 10))
+      : labSpectrumData.transmission;
+    drawLinePlot('cv-fit', [{ x: labSpectrumData.wavelength_nm, y: yMeas, color: '#38bdf8', label: 'Measured Broadband' }], 'Wavelength [nm]', 'Normalized Transmission');
   } else {
     const s = data.summary;
-    box.innerHTML = `<strong>Selected Model</strong>: ${s.model_type} (R² = ${s.r_squared.toFixed(5)})<br/>
-      lambda_0 = ${s.lambda0_nm.toFixed(5)} nm<br/>
-      Q_loaded = <strong>${Math.round(s.Q_loaded).toLocaleString()}</strong> | Q_int = <strong>${Math.round(s.Q_int).toLocaleString()}</strong> | Q_ext = ${Math.round(s.Q_ext).toLocaleString()}<br/>
-      Doublet Split 2g/2pi = ${(2 * (s.mu_split_ghz || 0)).toFixed(3)} GHz`;
+    lastExtractedLossDbCm = s.alpha_loss_db_per_cm;
+    const isResolved = s.alpha_loss_selected_db_per_cm !== null && s.alpha_loss_selected_db_per_cm !== undefined;
+
+    document.getElementById('fit-kpi-loss').textContent = `${s.alpha_loss_db_per_cm.toFixed(3)} dB/cm`;
+    document.getElementById('fit-kpi-loss-branches').textContent = isResolved
+      ? (currentLang === 'zh' ? '分支已唯一确定' : 'Branch Resolved')
+      : `Under: ${s.alpha_loss_under_db_per_cm.toFixed(2)} | Over: ${s.alpha_loss_over_db_per_cm.toFixed(2)} dB/cm`;
+    document.getElementById('fit-kpi-qint').textContent = Math.round(s.Q_int).toLocaleString();
+    document.getElementById('fit-kpi-rtloss').textContent = s.roundtrip_loss_db !== null ? `RT Loss ${s.roundtrip_loss_db.toFixed(4)} dB` : `Q_ext ${Math.round(s.Q_ext).toLocaleString()}`;
+    document.getElementById('fit-kpi-ql').textContent = Math.round(s.Q_loaded).toLocaleString();
+    document.getElementById('fit-kpi-fwhm').textContent = `FWHM ${s.fwhm_pm.toFixed(2)} pm`;
+    document.getElementById('fit-kpi-split').textContent = `${(2 * (s.mu_split_ghz || 0)).toFixed(2)} GHz`;
+    document.getElementById('fit-kpi-r2').textContent = `${s.model_type} · R²=${s.r_squared.toFixed(4)}`;
+
+    box.innerHTML = (currentLang === 'zh'
+      ? `<strong>${s.model_type.toUpperCase()} 拟合结果</strong>（<code>λ₀ = ${s.lambda0_nm.toFixed(4)} nm</code>，采用 <code>n_g = ${s.ng_used}</code>）：<strong><code>α = ${s.alpha_loss_db_per_cm.toFixed(3)} dB/cm</code></strong> `
+      : `<strong>${s.model_type.toUpperCase()} Fit</strong> at <code>λ₀ = ${s.lambda0_nm.toFixed(4)} nm</code> (using <code>n_g = ${s.ng_used}</code>): <strong><code>α = ${s.alpha_loss_db_per_cm.toFixed(3)} dB/cm</code></strong> `) +
+      (!isResolved ? `(Under <code>${s.alpha_loss_under_db_per_cm.toFixed(3)} dB/cm</code> vs Over <code>${s.alpha_loss_over_db_per_cm.toFixed(3)} dB/cm</code>) ` : `(${s.coupling_regime_status}) `) +
+      `| <code>Q_ext = ${Math.round(s.Q_ext).toLocaleString()}</code>`;
+
+    useBtn.style.display = 'inline-flex';
+    useBtn.textContent = currentLang === 'zh'
+      ? `🎯 用 α = ${s.alpha_loss_db_per_cm.toFixed(2)} dB/cm 设计新微环 →`
+      : `🎯 Design Ring with α = ${s.alpha_loss_db_per_cm.toFixed(2)} dB/cm →`;
+
     drawLinePlot('cv-fit', [
-      { x: labSpectrumData.wavelength_nm, y: labSpectrumData.transmission, color: '#64748b', label: 'Measured Data' },
-      { x: labSpectrumData.wavelength_nm, y: data.y_fit, color: '#fb923c', width: 2.0, label: 'Analytical CMT Fit' }
+      { x: labSpectrumData.wavelength_nm, y: data.y_measured_linear || labSpectrumData.transmission, color: '#64748b', label: 'Measured Data' },
+      { x: labSpectrumData.wavelength_nm, y: data.y_fit, color: '#fb923c', width: 2.1, label: 'Analytical CMT Fit' }
     ], 'Wavelength [nm]', 'Normalized Transmission');
   }
 }
 
-// ==================== TAB 5: MATERIALS & HARDWARE ====================
+function applyExtractedLossToDesign() {
+  if (!lastExtractedLossDbCm) return;
+  const lossStr = Number(lastExtractedLossDbCm).toFixed(3);
+  document.getElementById('cfg-loss').value = lossStr;
+  if (copilotSession && copilotSession.confirmed && copilotSession.confirmed.includes('core_material')) {
+    sendChatPrompt(currentLang === 'zh' ? `传播损耗 = ${lossStr} dB/cm, 开始仿真` : `Propagation loss = ${lossStr} dB/cm, simulate`);
+  } else {
+    if (copilotSession && copilotSession.config) copilotSession.config.alpha_loss_db_per_cm = parseFloat(lossStr);
+    sendChatPrompt(currentLang === 'zh' ? '开始逐步设计微环' : 'Start step-by-step microring design');
+    setTimeout(() => {
+      appendChatBubble('assistant', currentLang === 'zh'
+        ? `📌 已自动记录您提取的实验波导损耗 **\`α = ${lossStr} dB/cm\`**！请先选择上方工作波段与材料，随后我将直接按 \`${lossStr} dB/cm\` 综合临界耦合参数。`
+        : `📌 Saved your extracted lab loss **\`α = ${lossStr} dB/cm\`**! Pick your wavelength band & material above and I will synthesize critical coupling for \`${lossStr} dB/cm\`.`);
+    }, 350);
+  }
+}
+
+// ==================== EXPERT DRAWER HELPERS ====================
 async function loadMaterialCurve() {
   const key = document.getElementById('mat-browser-sel').value || '4H-SiC';
   const r = await fetch(`/api/material_dispersion?key=${encodeURIComponent(key)}`);
   const d = await r.json();
   if (d.error) return;
-  const series = [{ x: d.wavelength_nm, y: d.nx, color: '#38bdf8', label: 'n_x (In-plane / TE)' }];
-  if (d.is_anisotropic) series.push({ x: d.wavelength_nm, y: d.ny, color: '#fb923c', dashed: true, label: 'n_y (Vertical / TM)' });
-  drawLinePlot('cv-mat', series, 'Wavelength [nm]', 'Refractive Index n(lambda)');
+  const series = [{ x: d.wavelength_nm, y: d.nx, color: '#38bdf8', label: 'n_x (TE)' }];
+  if (d.is_anisotropic) series.push({ x: d.wavelength_nm, y: d.ny, color: '#fb923c', dashed: true, label: 'n_y (TM)' });
+  drawLinePlot('cv-mat', series, 'Wavelength [nm]', 'Refractive Index n(λ)');
   document.getElementById('mat-props-text').innerHTML =
-    `dn/dT = ${d.dn_dt_per_k.toExponential(2)} /K | r_33 = ${d.r33_pm_per_v} pm/V | n_2 = ${d.n2_m2_per_w.toExponential(2)} m²/W<br/>Source: ${d.source}`;
+    `dn/dT = ${d.dn_dt_per_k.toExponential(2)} /K · r_33 = ${d.r33_pm_per_v} pm/V · n_2 = ${d.n2_m2_per_w.toExponential(2)} m²/W<br/>Source: ${d.source}`;
 }
 
 async function runBenchmarkUI() {
   const r = await fetch('/api/benchmark');
   const b = await r.json();
-  document.getElementById('hw-detail-box').innerHTML += `<div style="color:#34d399;margin-top:6px;">⚡ 100,000-pt FP64 TMM Spectrum solved in <strong>${b.elapsed_ms.toFixed(2)} ms</strong> (${b.throughput_mpts_per_s.toFixed(2)} M pts/s on ${b.backend_used})</div>`;
+  document.getElementById('hw-detail-box').innerHTML += `<div style="color:#34d399;margin-top:6px;">⚡ 100k-pt TMM Spectrum in <strong>${b.elapsed_ms.toFixed(2)} ms</strong> (${b.throughput_mpts_per_s.toFixed(2)} M pts/s)</div>`;
 }
 
 function exportSpectrumCSV() {
@@ -1598,16 +2020,25 @@ function exportSpectrumCSV() {
 
 // ==================== BOOTSTRAP ====================
 (async function boot() {
-  const [hwRes, matRes] = await Promise.all([fetch('/api/hardware'), fetch('/api/materials')]);
+  applyUiTranslations();
+  const [hwRes, matRes, aiRes] = await Promise.all([
+    fetch('/api/hardware'),
+    fetch('/api/materials'),
+    fetch('/api/ai_backends').catch(() => null),
+  ]);
   const hw = await hwRes.json();
   const matData = await matRes.json();
+  if (aiRes && aiRes.ok) {
+    try { aiBackendStatus = await aiRes.json(); } catch (_) {}
+  }
+  updateAiModeBadge();
 
-  document.getElementById('hw-badge').textContent = `${hw.recommended_backend}`;
+  document.getElementById('hw-badge').textContent = hw.recommended_backend;
   document.getElementById('hw-detail-box').innerHTML = `
     <div><strong>OS / Arch</strong>: ${hw.os_name} (${hw.arch})</div>
     <div><strong>CPU</strong>: ${hw.cpu_brand} (${hw.cpu_cores} cores)</div>
-    <div><strong>GPU / Accelerator</strong>: ${hw.gpu_name || 'CPU Vectorized'}</div>
-    <div><strong>Selected Engine</strong>: <span style="color:#38bdf8;">${hw.recommended_backend}</span></div>`;
+    <div><strong>Accelerator</strong>: ${hw.gpu_name || 'CPU Vectorized'}</div>
+    <div><strong>Active Engine</strong>: <span style="color:#38bdf8;">${hw.recommended_backend}</span></div>`;
 
   catalogMaterials = matData.materials;
   catalogTopologies = matData.topologies;
@@ -1627,7 +2058,6 @@ function exportSpectrumCSV() {
   document.getElementById('mat-browser-sel').value = '4H-SiC';
 
   await initChat();
-  loadMaterialCurve();
 })();
 </script>
 </body>

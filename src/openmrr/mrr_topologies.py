@@ -25,6 +25,7 @@ import math
 import os
 from pathlib import Path
 import pickle
+import sys
 import time
 
 import numpy as np
@@ -158,9 +159,23 @@ def _select_target_polarization(modes: list[EigenmodeResult], pol: str) -> Eigen
     return max(pool, key=lambda m: float(np.real(m.n_eff)))
 
 
+def get_default_output_root() -> Path:
+    """Return a writable output directory across repo clones, pip installs, and frozen .app/.exe apps."""
+    env_dir = os.environ.get("OPENMRR_OUTPUT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    if not getattr(sys, "frozen", False):
+        repo_candidate = Path(__file__).resolve().parents[2]
+        if (repo_candidate / "pyproject.toml").is_file():
+            return repo_candidate / "outputs"
+    docs = Path.home() / "Documents"
+    base = docs if docs.is_dir() else Path.home()
+    return base / "OpenMRR_Studio"
+
+
 _MODE_MEM_CACHE: dict[str, EigenmodeResult] = {}
 _CACHE_DIR = Path(
-    os.environ.get("OPENMRR_CACHE_DIR", str(Path(__file__).resolve().parents[2] / "outputs" / ".mode_cache"))
+    os.environ.get("OPENMRR_CACHE_DIR", str(get_default_output_root() / ".mode_cache"))
 )
 
 

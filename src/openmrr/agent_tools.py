@@ -30,12 +30,12 @@ from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
     export_mrr_gds,
+    get_default_output_root,
     simulate_mrr_topology,
 )
 from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-AGENT_OUT_DIR = Path(os.environ.get("OPENMRR_AGENT_OUT", str(REPO_ROOT / "outputs" / "agent_runs")))
+AGENT_OUT_DIR = Path(os.environ.get("OPENMRR_AGENT_OUT", str(get_default_output_root() / "agent_runs")))
 
 
 def _cfg_from_dict(d: dict) -> MRRDesignConfig:
@@ -187,6 +187,7 @@ def agent_design_mrr(params: dict) -> dict:
         "W_ring_um": cfg.ring_width_um,
         "W_bus_um": cfg.bus_width_um,
         "gap_um": cfg.gap_thru_um,
+        "loss_dB_cm": round(m["alpha_loss_db_per_cm"], 3),
         "neff": round(m["neff_ring"], 5),
         "ng": round(m["ng_ring"], 5),
         "FSR_GHz": round(m["FSR_GHz"], 2),
@@ -198,15 +199,15 @@ def agent_design_mrr(params: dict) -> dict:
         "regime": cc["regime"],
         "cc_param": cc["parameter"],
         "cc_val": cc["recommended_value"],
-        "shift_pm": round(m["tuning_shift_pm"], 2),
         "ms": round((time.perf_counter() - t0) * 1e3, 1),
         "csv": str(csv_path),
     }
+    if abs(float(m.get("tuning_shift_pm", 0.0))) > 1e-6:
+        out["shift_pm"] = round(m["tuning_shift_pm"], 2)
     if params.get("export_gds"):
         gds_path = export_mrr_gds(cfg, AGENT_OUT_DIR / f"{tag}.gds")
-        lyp_path = write_klayout_layer_props(Path(gds_path).with_suffix(".lyp"))
+        write_klayout_layer_props(Path(gds_path).with_suffix(".lyp"))
         out["gds"] = gds_path
-        out["lyp"] = lyp_path
     return out
 
 
@@ -282,8 +283,9 @@ def agent_fit_spectrum(params: dict) -> dict:
 
     model_type = str(params.get("model_type") or "auto")
     regime = params.get("known_regime") or None
+    l_rt = float(params.get("ring_length_um") or 250.0)
+    ng_in = float(params.get("ng") or params.get("ng_assumed") or 2.10)
     if model_type == "multi_fsr":
-        l_rt = float(params.get("ring_length_um") or 250.0)
         m_res = fit_multi_resonance_spectrum(wl, tr, ring_length_um=l_rt, known_regime=regime)
         return {
             "mode": "multi_fsr",
@@ -292,9 +294,13 @@ def agent_fit_spectrum(params: dict) -> dict:
             "FSR_nm": round(m_res["mean_fsr_nm"], 4),
             "ng_extracted": round(m_res["ng_extracted"], 5) if m_res["ng_extracted"] else None,
             "mean_Q_L": int(m_res["mean_Q_loaded"]),
+            "mean_Q_int": int(m_res["mean_Q_int"]),
+            "loss_dB_cm": m_res["alpha_loss_db_per_cm"],
         }
 
-    s, y_fit, _ = fit_single_resonance_cmt(wl, tr, model_type=model_type, known_regime=regime)
+    s, y_fit, _ = fit_single_resonance_cmt(
+        wl, tr, model_type=model_type, known_regime=regime, ng_assumed=ng_in, ring_length_um=l_rt
+    )
     fit_csv = AGENT_OUT_DIR / f"fitted_{csv_in.stem}.csv"
     np.savetxt(
         fit_csv,
@@ -310,6 +316,10 @@ def agent_fit_spectrum(params: dict) -> dict:
         "Q_L": int(s.Q_loaded),
         "Q_int": int(s.Q_int),
         "Q_ext": int(s.Q_ext),
+        "loss_dB_cm": round(s.alpha_loss_db_per_cm, 4),
+        "loss_under_dB_cm": s.alpha_loss_under_db_per_cm,
+        "loss_over_dB_cm": s.alpha_loss_over_db_per_cm,
+        "ng_used": s.ng_used,
         "ER_dB": round(s.extinction_ratio_db, 2),
         "split_2g_ghz": round(2.0 * s.mu_split_ghz, 4),
         "regime": s.coupling_regime_status,

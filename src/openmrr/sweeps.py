@@ -161,6 +161,7 @@ def run_mrr_parameter_sweep(
         "straight_length_um": "um",
         "ring_radius_um": "um",
         "ring_width_um": "um",
+        "alpha_loss_db_per_cm": "dB/cm",
         "delta_temp_k": "K",
         "voltage_v": "V",
     }
@@ -168,13 +169,14 @@ def run_mrr_parameter_sweep(
         raise ValueError(f"Unsupported sweep parameter '{param_name}'. Choose from {list(allowed)}")
 
     vals = [float(v) for v in values]
-    q_loaded_arr, q_ext_arr, fsr_nm_arr, er_db_arr, cp_arr, shift_pm_arr = [], [], [], [], [], []
+    q_loaded_arr, q_int_arr, q_ext_arr, fsr_nm_arr, er_db_arr, cp_arr, shift_pm_arr = [], [], [], [], [], [], []
 
     for v in vals:
         cfg_i = replace(base_cfg, **{param_name: v})
         res = simulate_mrr_topology(cfg_i)
         m = res["metrics"]
         q_loaded_arr.append(m["Q_loaded"])
+        q_int_arr.append(m["Q_int"])
         q_ext_arr.append(m["Q_ext_thru"])
         fsr_nm_arr.append(m["FSR_nm"])
         er_db_arr.append(m["extinction_ratio_thru_dB"])
@@ -189,6 +191,7 @@ def run_mrr_parameter_sweep(
         "unit": allowed[param_name],
         "values": [round(v, 5) for v in vals],
         "Q_loaded": q_loaded_arr,
+        "Q_int": q_int_arr,
         "Q_ext_thru": q_ext_arr,
         "FSR_nm": fsr_nm_arr,
         "extinction_ratio_dB": er_db_arr,

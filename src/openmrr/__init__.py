@@ -1,7 +1,7 @@
 """OpenMRR Studio (`openmrr`) — License-Free Photonics Eigenmode, CMT & GDSII Suite."""
 from __future__ import annotations
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 from .agent_tools import (
     agent_design_mrr,
@@ -43,6 +43,8 @@ from .mrr_cmt_fit_predict import (
     CMTFitSummary,
     fit_multi_resonance_spectrum,
     fit_single_resonance_cmt,
+    loss_db_per_cm_to_q_int,
+    q_int_to_loss_db_per_cm,
     tmm_broadband_mrr_spectrum,
 )
 from .mrr_topologies import (
@@ -81,8 +83,10 @@ __all__ = [
     "fit_multi_resonance_spectrum",
     "fit_single_resonance_cmt",
     "get_material_fn",
+    "loss_db_per_cm_to_q_int",
     "parse_photonics_intent",
     "process_chat_turn",
+    "q_int_to_loss_db_per_cm",
     "run_compute_benchmark",
     "run_mrr_parameter_sweep",
     "run_waveguide_width_sweep",

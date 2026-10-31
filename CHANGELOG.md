@@ -2,6 +2,22 @@
 
 All notable changes to **OpenMRR Studio** are documented in this file.
 
+## [3.2.0] - 2026-10-31
+
+### Added
+- **6-Step Guided Bilingual (`EN | 中文`) Conversational UI (`ui_frontend.py`, `copilot.py`)**:
+  - Redesigned the studio into a spacious, zero-overload step-by-step guided chatbot (`1. Goal` → `2. Waveband` → `3. Material` → `4. Stack & 2D Mode` → `5. Propagation Loss & Ring/FSR` → `6. Critical Coupling & GDS`) with a progressive right-hand visual stage and an optional slide-over `⚙ Expert Controls` drawer.
+  - Added a top-bar **`EN | 中文`** language switch translating all UI labels, stepper badges, placeholders, plots, and Copilot prompts/chips instantaneously without losing design state.
+- **Bidirectional Waveguide Propagation Loss (`dB/cm`) Workflow (`mrr_cmt_fit_predict.py`, `sweeps.py`, `agent_tools.py`)**:
+  - Added exact group-index conversions `loss_db_per_cm_to_q_int` and `q_int_to_loss_db_per_cm`, propagation loss sweeps (`alpha_loss_db_per_cm`), and `--loss` CLI/MCP support.
+  - Upgraded the Lab Spectrum CMT Fitter to accept both linear-power and logarithmic `dB`/`dBm` `.CSV`/`.TXT` traces, extract propagation loss $\alpha$ (`dB/cm`) + $Q_{\mathrm{int}}$ + self-consistent multi-FSR $n_g$, and hand off extracted loss to new ring critical-coupling synthesis in 1 click.
+- **Native Desktop Installers (`.dmg` & `.exe`) + Offline/Online (`Claude` & `Codex`) Modes**:
+  - Added `src/openmrr/build_standalone.py`, `packaging/windows_installer.iss`, and `packaging/build_installers_workflow.yml` to compile zero-Python standalone installers (`OpenMRR-Studio-v3.2.0-macOS-AppleSilicon.dmg` and `OpenMRR-Studio-v3.2.0-Windows-Setup-x64.exe`).
+  - Added a 4-mode AI Engine switcher in the Studio UI (`⚡ Offline` | `🖥 Local Ollama/MLX` | `🟣 Online · Claude` | `🟢 Online · Codex / OpenAI`), supporting both locally signed-in `claude` / `codex` CLIs (zero API key needed) and optional in-memory API keys, plus `.devcontainer/devcontainer.json` for 1-click browser launch on GitHub Codespaces.
+
+### Changed
+- Removed legacy unused `gmsh`/`femwell` branch in `eigenmode_solver.py` so 100% of core code and dependencies are permissive (`MIT` / `BSD-3-Clause` / `Boost-1.0`, zero GPL).
+
 ## [3.1.0] - 2026-10-31
 
 ### Added
