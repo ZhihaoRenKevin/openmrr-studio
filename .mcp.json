@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openmrr": {
+      "command": "uv",
+      "args": ["run", "openmrr", "mcp"]
+    }
+  }
+}

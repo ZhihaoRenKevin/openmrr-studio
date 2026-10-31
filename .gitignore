@@ -1,0 +1,22 @@
+# Python & Packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+
+# Generated simulation & layout outputs
+outputs/
+*.mph
+*.fsp
+*.lms
+
+# Keep curated docs/images hero figures, ignore ad-hoc scratch
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
