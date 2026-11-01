@@ -40,6 +40,11 @@ from .eigenmode_solver import (
     solve_modes_fde_tidy3d,
     solve_modes_fem,
 )
+from .fab_tolerance import (
+    RESIST_TONE_CATALOG,
+    export_fab_bias_array_gds,
+    run_fabrication_error_analysis,
+)
 from .gds_bridge import (
     analyze_uploaded_gds,
     export_sweep_array_gds,
@@ -437,6 +442,66 @@ async def api_export_sweep_gds(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+def _fab_tolerance_sync(payload: dict) -> dict:
+    cfg = _dict_to_mrr_config(payload.get("config", payload))
+    return run_fabrication_error_analysis(
+        cfg,
+        resist_tone=str(payload.get("resist_tone", "positive_pr")),
+        max_dose_error_pct=float(payload.get("max_dose_error_pct", 15.0)),
+        dose_slope_nm_per_pct=float(payload["dose_slope_nm_per_pct"]) if payload.get("dose_slope_nm_per_pct") not in (None, "") else None,
+        max_cd_bias_nm=float(payload.get("max_cd_bias_nm", 30.0)),
+        proximity_gap_factor=float(payload["proximity_gap_factor"]) if payload.get("proximity_gap_factor") not in (None, "") else None,
+        delta_h_film_nm=float(payload.get("delta_h_film_nm", 0.0)),
+        delta_sidewall_deg=float(payload.get("delta_sidewall_deg", 0.0)),
+        num_points=int(payload.get("num_points", 7)),
+    )
+
+
+async def api_fab_tolerance(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_fab_tolerance_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _export_fab_gds_sync(payload: dict) -> dict:
+    cfg = _dict_to_mrr_config(payload.get("config", payload))
+    prox = float(payload.get("proximity_gap_factor") or 1.0)
+    biases = payload.get("cd_prebias_list_nm")
+    bias_list = [float(b) for b in biases] if biases else [-20.0, -10.0, 0.0, 10.0, 20.0]
+    GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    fname = f"OpenMRR_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
+    out_path = GDS_EXPORT_DIR / fname
+    info = export_fab_bias_array_gds(
+        cfg,
+        out_path,
+        cd_prebias_list_nm=bias_list,
+        proximity_gap_factor=prox,
+    )
+    saved = info["gds_path"]
+    lyp_saved = info["lyp_path"]
+    gds_view = analyze_uploaded_gds(saved)
+    return {
+        "saved_path": saved,
+        "lyp_path": lyp_saved,
+        "cells": info["cells"],
+        "gds_download_url": f"/api/download_file?name={Path(saved).name}",
+        "lyp_download_url": f"/api/download_file?name={Path(lyp_saved).name}",
+        "gds_view": gds_view,
+    }
+
+
+async def api_export_fab_gds(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_export_fab_gds_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
 async def api_download_file(request: Request) -> Response:
     raw_name = request.query_params.get("name", "")
     safe = _safe_filename(raw_name)
@@ -569,6 +634,8 @@ def create_app() -> Starlette:
         Route("/api/sweep_mrr", api_sweep_mrr, methods=["POST"]),
         Route("/api/export_gds", api_export_gds, methods=["POST"]),
         Route("/api/export_sweep_gds", api_export_sweep_gds, methods=["POST"]),
+        Route("/api/fab_tolerance", api_fab_tolerance, methods=["POST"]),
+        Route("/api/export_fab_gds", api_export_fab_gds, methods=["POST"]),
         Route("/api/download_file", api_download_file, methods=["GET"]),
         Route("/api/demo_spectrum", api_demo_spectrum, methods=["GET"]),
         Route("/api/fit_spectrum", api_fit_spectrum, methods=["POST"]),

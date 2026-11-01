@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .agent_tools import (
     agent_design_mrr,
+    agent_fab_tolerance,
     agent_fit_spectrum,
     agent_inspect_gds,
     agent_status,
@@ -115,6 +116,25 @@ def main() -> None:
     p_af.add_argument("--regime", default=None, dest="known_regime")
     p_af.add_argument("--lrt", type=float, default=250.0, dest="ring_length_um")
 
+    p_at = ag_sub.add_parser("fab-tolerance", help="Cleanroom positive/negative PR dose & CD-bias error analysis")
+    p_at.add_argument("--resist", default="positive_pr", dest="resist_tone", help="positive_pr | negative_pr | direct_cd")
+    p_at.add_argument("--dose-pct", type=float, default=15.0, dest="max_dose_error_pct")
+    p_at.add_argument("--slope", type=float, default=None, dest="dose_slope_nm_per_pct")
+    p_at.add_argument("--cd-nm", type=float, default=30.0, dest="max_cd_bias_nm")
+    p_at.add_argument("--prox", type=float, default=None, dest="proximity_gap_factor")
+    p_at.add_argument("--dh", type=float, default=0.0, dest="delta_h_film_nm")
+    p_at.add_argument("--top", default="point_circular_ap")
+    p_at.add_argument("--mat", default="Si3N4")
+    p_at.add_argument("--h", type=float, default=None, dest="h_um")
+    p_at.add_argument("--w-ring", type=float, default=None, dest="w_ring_um")
+    p_at.add_argument("--w-bus", type=float, default=None, dest="w_bus_um")
+    p_at.add_argument("--r", type=float, default=None, dest="r_um")
+    p_at.add_argument("--gap", type=float, default=None, dest="gap_um")
+    p_at.add_argument("--wl", type=float, default=None, dest="wl_nm")
+    p_at.add_argument("--cc", action="store_true", dest="apply_cc")
+    p_at.add_argument("--bias-gds", action="store_true", dest="export_bias_gds")
+    p_at.add_argument("--json", type=str, default=None, dest="raw_json")
+
     args = parser.parse_args()
 
     if args.cmd in (None, "app"):
@@ -169,6 +189,8 @@ def main() -> None:
             _print_compact(agent_design_mrr(d))
         elif args.agent_cmd == "sweep":
             _print_compact(agent_sweep_mrr(d))
+        elif args.agent_cmd == "fab-tolerance":
+            _print_compact(agent_fab_tolerance(d))
 
 
 if __name__ == "__main__":

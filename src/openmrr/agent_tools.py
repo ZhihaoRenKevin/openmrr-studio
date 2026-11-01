@@ -18,6 +18,7 @@ import time
 
 import numpy as np
 
+from .fab_tolerance import export_fab_bias_array_gds, run_fabrication_error_analysis
 from .gds_bridge import (
     analyze_uploaded_gds,
     export_sweep_array_gds,
@@ -326,3 +327,84 @@ def agent_fit_spectrum(params: dict) -> dict:
         "r2": round(s.r_squared, 5),
         "fit_csv": str(fit_csv),
     }
+
+
+def agent_fab_tolerance(params: dict) -> dict:
+    """Run lithography exposure dose / photoresist-tone / CD-bias error analysis (<150 tokens)."""
+    t0 = time.perf_counter()
+    AGENT_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = _cfg_from_dict(params)
+    if params.get("apply_cc"):
+        scout = simulate_mrr_topology(cfg)
+        cc_info = scout["critical_coupling"]
+        cfg = replace(cfg, **{cc_info["parameter"]: float(cc_info["recommended_value"])})
+
+    resist = str(params.get("resist_tone") or params.get("resist") or "positive_pr")
+    dose_pct = float(params.get("max_dose_error_pct") or params.get("dose_pct") or 15.0)
+    slope = params.get("dose_slope_nm_per_pct") or params.get("slope_nm_pct")
+    cd_nm = float(params.get("max_cd_bias_nm") or params.get("cd_nm") or 30.0)
+    prox = params.get("proximity_gap_factor") or params.get("prox")
+    dh_nm = float(params.get("delta_h_film_nm") or params.get("dh_nm") or 0.0)
+    n_pts = int(params.get("num_points") or 7)
+
+    fab = run_fabrication_error_analysis(
+        cfg,
+        resist_tone=resist,
+        max_dose_error_pct=dose_pct,
+        dose_slope_nm_per_pct=float(slope) if slope is not None else None,
+        max_cd_bias_nm=cd_nm,
+        proximity_gap_factor=float(prox) if prox is not None else None,
+        delta_h_film_nm=dh_nm,
+        num_points=n_pts,
+    )
+    corners = fab["corners"]
+    csv_path = AGENT_OUT_DIR / f"fab_{cfg.core_material}_{resist}.csv"
+    np.savetxt(
+        csv_path,
+        np.column_stack([
+            [c["dose_error_pct"] for c in corners],
+            [c["delta_cd_nm"] for c in corners],
+            [c["w_ring_fab_um"] for c in corners],
+            [c["gap_fab_um"] for c in corners],
+            [c["extinction_ratio_dB"] for c in corners],
+            [c["Q_loaded"] for c in corners],
+            [c["delta_wl_res_nm"] for c in corners],
+        ]),
+        delimiter=",",
+        header="dose_error_pct,delta_cd_nm,w_ring_fab_um,gap_fab_um,ER_dB,Q_loaded,delta_wl_res_nm",
+        comments="",
+    )
+    s = fab["summary"]
+    out = {
+        "resist": fab["resist_tone"],
+        "nom_ER_dB": s["nominal_er_dB"],
+        "under_dose": {
+            "dose_pct": s["under_dose_corner"]["dose_error_pct"],
+            "dCD_nm": s["under_dose_corner"]["delta_cd_nm"],
+            "gap_nm": round(s["under_dose_corner"]["gap_fab_um"] * 1e3, 1),
+            "ER_dB": s["under_dose_corner"]["extinction_ratio_dB"],
+            "dwl_nm": s["under_dose_corner"]["delta_wl_res_nm"],
+            "regime": s["under_dose_corner"]["coupling_regime"],
+        },
+        "over_dose": {
+            "dose_pct": s["over_dose_corner"]["dose_error_pct"],
+            "dCD_nm": s["over_dose_corner"]["delta_cd_nm"],
+            "gap_nm": round(s["over_dose_corner"]["gap_fab_um"] * 1e3, 1),
+            "ER_dB": s["over_dose_corner"]["extinction_ratio_dB"],
+            "dwl_nm": s["over_dose_corner"]["delta_wl_res_nm"],
+            "regime": s["over_dose_corner"]["coupling_regime"],
+        },
+        "cd_win_ER15_nm": s["cd_window_er15_nm"],
+        "dose_win_ER15_pct": s["dose_window_er15_pct"],
+        "dl_dCD_pm_nm": s["sensitivity_dl_dcd_pm_per_nm"],
+        "ms": round((time.perf_counter() - t0) * 1e3, 1),
+        "csv": str(csv_path),
+    }
+    if params.get("export_bias_gds"):
+        gds_info = export_fab_bias_array_gds(
+            cfg,
+            AGENT_OUT_DIR / f"opc_bias_array_{cfg.core_material}_{cfg.topology}.gds",
+            proximity_gap_factor=fab["proximity_gap_factor"],
+        )
+        out["bias_gds"] = gds_info["gds_path"]
+    return out

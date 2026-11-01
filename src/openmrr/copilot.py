@@ -23,6 +23,7 @@ import urllib.request
 
 import numpy as np
 
+from .fab_tolerance import export_fab_bias_array_gds, run_fabrication_error_analysis
 from .gds_bridge import (
     analyze_uploaded_gds,
     export_sweep_array_gds,
@@ -777,6 +778,28 @@ def parse_photonics_intent(message: str) -> dict:
         out["action"] = "apply_critical_coupling"
     elif re.search(r"(?:sweep|array).*gds|gds.*(?:sweep|array)|阵列.*(?:gds|版图)", low):
         out["action"] = "export_sweep_gds"
+    elif re.search(
+        r"(?:pre[-_\s]*bias|opc|dose[-_\s]*(?:bracket|comp)).*(?:gds|array|mask)|(?:预偏置|补偿阵列|剂量阵列).*(?:gds|版图)",
+        low,
+    ):
+        out["action"] = "export_fab_bias_gds"
+    elif re.search(
+        r"over[-_\s]*dos|under[-_\s]*dos|positive[-_\s]*(?:pr\b|resist)|negative[-_\s]*(?:pr\b|resist)|nagetive[-_\s]*(?:pr\b|resist)|\bhsq\b|\bzep520|\bcsar\b|fab(?:rication)?[-_\s]*(?:error|tol|analys|yield)|dose[-_\s]*(?:error|tol|sweep)|cd[-_\s]*(?:bias|error|tol)|过曝|欠曝|正胶|负胶|正性光刻胶|负性光刻胶|曝光剂量|工艺误差|工艺容差|线宽偏置|线宽误差",
+        low,
+    ):
+        out["action"] = "fab_tolerance"
+        resist_tone = "positive_pr"
+        if re.search(r"negative|nagetive|\bhsq\b|\bma-?n\b|\bsu-?8\b|lift[-_\s]*off|负胶|负性|剥离", low):
+            resist_tone = "negative_pr"
+        elif re.search(r"direct[-_\s]*cd|cd[-_\s]*(?:bias|sweep)|线宽偏置", low) and not re.search(r"positive|negative|nagetive|正胶|负胶|dose|剂量|曝", low):
+            resist_tone = "direct_cd"
+        pct_m = re.search(r"(\d+(?:\.\d+)?)\s*%", low)
+        nm_m = re.search(r"(?:cd|bias|±|\+/-)\s*(\d+(?:\.\d+)?)\s*nm", low)
+        out["fab"] = {
+            "resist_tone": resist_tone,
+            "max_dose_error_pct": float(pct_m.group(1)) if pct_m else 15.0,
+            "max_cd_bias_nm": float(nm_m.group(1)) if nm_m else 30.0,
+        }
     elif re.search(r"(?:export|create|save|generate|download)\b.*(?:\.?\bgds\b|layout|mask)|(?:生成|导出|创建).*(?:gds|版图)", low):
         out["action"] = "export_single_gds"
     elif re.search(r"\b(simulate|calculate|compute|run\s+mrr|evaluate)\b|开始仿真|运行仿真|计算光谱|确认并仿真", low):
@@ -1646,6 +1669,115 @@ def _process_chat_turn_core(
         }
 
     # ------------------------------------------------------------------
+    # Direct Action 2B: Lithography Dose / Positive-Negative PR Error Analysis & Pre-Bias GDS
+    # ------------------------------------------------------------------
+    if intent["action"] == "export_fab_bias_gds":
+        out_dir = Path(gds_export_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"OpenMRR_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
+        bias_info = export_fab_bias_array_gds(cfg, out_dir / fname)
+        gds_path = bias_info["gds_path"]
+        lyp_path = bias_info["lyp_path"]
+        gds_view = analyze_uploaded_gds(gds_path)
+        msg = (
+            f"🗂️ **已生成 5 单元光刻剂量/线宽预偏置补偿阵列 `{Path(gds_path).name}`**\n"
+            f"- 版图预偏置 `ΔCD_drawn = [-20, -10, 0, +10, +20] nm`（同步反向补偿 `W - δ` 与 `gap + δ`），确保超净间无论过曝或欠曝，片上至少有一颗微环精准命中临界耦合！\n"
+            f"- 配套 KLayout 图层文件：`{Path(lyp_path).name}`。"
+            if zh
+            else f"🗂️ **Generated 5-Cell Lithography Pre-Bias Compensation Array `{Path(gds_path).name}`**\n"
+            f"- Brackets drawn mask `ΔCD_drawn = [-20, -10, 0, +10, +20] nm` (`W_drawn + δ`, `gap_drawn - δ`) so even if cleanroom exposure over-doses or under-doses by `±20 nm`, one cell on-chip lands right at critical coupling!\n"
+            f"- Includes KLayout layer map `{Path(lyp_path).name}`."
+        )
+        session["wizard_step"] = 6
+        session["ui_view"] = "gds"
+        chips = (
+            [
+                {"label": "🧪 返回工艺/光刻胶容差面板", "prompt": "正胶过曝与欠曝工艺误差分析"},
+                {"label": "📊 返回微环透射光谱", "prompt": "开始仿真"},
+            ]
+            if zh
+            else [
+                {"label": "🧪 Back to Fab / PR Dose Panel", "prompt": "Check positive PR over-dose and under-dose error"},
+                {"label": "📊 Back to MRR Spectrum", "prompt": "Simulate current MRR"},
+            ]
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "gds_export": {"gds_path": gds_path, "lyp_path": lyp_path, "gds_view": gds_view},
+            "ui_view": "gds",
+            "wizard_step": 6,
+            "active_tab": "tab-gds",
+        }
+
+    if intent["action"] == "fab_tolerance":
+        fab_opts = intent.get("fab") or {}
+        resist_tone = str(fab_opts.get("resist_tone") or "positive_pr")
+        dose_pct = float(fab_opts.get("max_dose_error_pct") or 15.0)
+        cd_nm = float(fab_opts.get("max_cd_bias_nm") or 30.0)
+        fab_res = run_fabrication_error_analysis(
+            cfg,
+            resist_tone=resist_tone,
+            max_dose_error_pct=dose_pct,
+            max_cd_bias_nm=cd_nm,
+            num_points=7,
+        )
+        s = fab_res["summary"]
+        uc = s["under_dose_corner"]
+        oc = s["over_dose_corner"]
+        session["wizard_step"] = 6
+        session["ui_view"] = "fab"
+        if zh:
+            msg = (
+                f"🧪 **已完成光刻曝光与刻蚀容差分析（`{fab_res['resist_name_zh']}`）**\n"
+                f"- **物理机制**：\n"
+                f"  - **过曝光 (`{oc['dose_error_pct']:+.0f}%`)**：`ΔCD = {oc['delta_cd_nm']:+.1f} nm`，实际 `gap = {oc['gap_fab_um']*1000:.0f} nm` → `ER = {oc['extinction_ratio_dB']:.1f} dB`（`{oc['coupling_regime']}`，`Δλ = {oc['delta_wl_res_nm']:+.2f} nm`）\n"
+                f"  - **欠曝光 (`{uc['dose_error_pct']:+.0f}%`)**：`ΔCD = {uc['delta_cd_nm']:+.1f} nm`，实际 `gap = {uc['gap_fab_um']*1000:.0f} nm` → `ER = {uc['extinction_ratio_dB']:.1f} dB`（`{uc['coupling_regime']}`，`Δλ = {uc['delta_wl_res_nm']:+.2f} nm`）\n"
+                f"- **`ER ≥ 15 dB` 工艺良率窗口**：线宽窗口 **`{s['cd_window_er15_span_nm']:.1f} nm`**（`{s['cd_window_er15_nm']}` nm）｜曝光剂量窗口 **`{s['dose_window_er15_span_pct']:.1f}%`**\n"
+                f"- **谐振波长线宽灵敏度**：**`dλ/dCD = {s['sensitivity_dl_dcd_pm_per_nm']:+.1f} pm/nm`**"
+            )
+            if fab_res["drc_warnings"]:
+                msg += "\n- ⚠️ **超净间工艺提示**：" + "；".join(fab_res["drc_warnings"])
+            chips = [
+                {
+                    "label": "🔄 切换为负性光刻胶 (HSQ / ma-N)" if resist_tone != "negative_pr" else "🔄 切换为正性光刻胶 (ZEP / DUV)",
+                    "prompt": "负胶 ±15% 曝光剂量误差分析" if resist_tone != "negative_pr" else "正胶 ±15% 曝光剂量误差分析",
+                },
+                {"label": "🗂️ 导出 5 单元预偏置补偿阵列 .GDS", "prompt": "导出预偏置补偿阵列 GDS"},
+                {"label": "⚡ 先优化至临界耦合再测容差", "prompt": "临界耦合"},
+            ]
+        else:
+            msg = (
+                f"🧪 **Lithography & Photoresist Fabrication Error Analysis (`{fab_res['resist_name_en']}`)**\n"
+                f"- **Over-Dose (`{oc['dose_error_pct']:+.0f}%`)**: `ΔCD = {oc['delta_cd_nm']:+.1f} nm`, `gap_fab = {oc['gap_fab_um']*1000:.0f} nm` -> `ER = {oc['extinction_ratio_dB']:.1f} dB` (`{oc['coupling_regime']}`, `Δλ = {oc['delta_wl_res_nm']:+.2f} nm`)\n"
+                f"- **Under-Dose (`{uc['dose_error_pct']:+.0f}%`)**: `ΔCD = {uc['delta_cd_nm']:+.1f} nm`, `gap_fab = {uc['gap_fab_um']*1000:.0f} nm` -> `ER = {uc['extinction_ratio_dB']:.1f} dB` (`{uc['coupling_regime']}`, `Δλ = {uc['delta_wl_res_nm']:+.2f} nm`)\n"
+                f"- **`ER ≥ 15 dB` Process Yield Window**: CD window **`{s['cd_window_er15_span_nm']:.1f} nm`** (`{s['cd_window_er15_nm']}` nm) | Dose window **`{s['dose_window_er15_span_pct']:.1f}%`**\n"
+                f"- **Resonance CD Sensitivity**: **`dλ/dCD = {s['sensitivity_dl_dcd_pm_per_nm']:+.1f} pm/nm`**"
+            )
+            if fab_res["drc_warnings"]:
+                msg += "\n- ⚠️ **Cleanroom DRC Notes**: " + " ".join(fab_res["drc_warnings"])
+            chips = [
+                {
+                    "label": "🔄 Compare Negative PR (HSQ / ma-N)" if resist_tone != "negative_pr" else "🔄 Compare Positive PR (ZEP / DUV)",
+                    "prompt": "Analyze negative PR ±15% over-dose and under-dose" if resist_tone != "negative_pr" else "Analyze positive PR ±15% over-dose and under-dose",
+                },
+                {"label": "🗂️ Export 5-Cell Pre-Biased Compensation .GDS", "prompt": "Export pre-biased dose compensation array GDS"},
+                {"label": "⚡ Apply Critical Coupling First", "prompt": "Apply critical coupling"},
+            ]
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        return {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "fab_result": fab_res,
+            "ui_view": "fab",
+            "wizard_step": 6,
+            "active_tab": "tab-fab",
+        }
+
+    # ------------------------------------------------------------------
     # Guided Step 3 -> Step 4 Pre-Check: Material chosen, ask to confirm Wafer Stack
     # ------------------------------------------------------------------
     if (
@@ -1654,7 +1786,7 @@ def _process_chat_turn_core(
         and session.get("last_width_sweep") is None
         and "resonator_size" not in confirmed
         and "topology" not in confirmed
-        and intent["action"] not in ("sweep_width", "simulate_mrr", "sweep_mrr")
+        and intent["action"] not in ("sweep_width", "simulate_mrr", "sweep_mrr", "fab_tolerance", "export_fab_bias_gds")
         and "uploaded_gds" not in confirmed
     ):
         session["stage"] = "ask_stack"
@@ -2017,6 +2149,7 @@ def _process_chat_turn_core(
     chips = (
         [
             {"label": f"⚡ 一键应用临界耦合 ({cc['recommended_value']} {cc['unit']})", "prompt": "临界耦合"},
+            {"label": "🧪 正/负胶过曝与欠曝容差分析", "prompt": "正胶 ±15% 过曝与欠曝工艺误差分析"},
             {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
             {"label": "🗂️ 导出 5 环扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
             {"label": "📏 扫描耦合间距 Gap", "prompt": "扫描间距"},
@@ -2025,6 +2158,7 @@ def _process_chat_turn_core(
         if zh
         else [
             {"label": f"⚡ Apply Critical Coupling ({cc['recommended_value']} {cc['unit']})", "prompt": "Apply critical coupling"},
+            {"label": "🧪 Fab Error (Over/Under-Dose PR)", "prompt": "Analyze positive PR ±15% over-dose and under-dose"},
             {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
             {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
             {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap"},

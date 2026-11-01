@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 import sys
@@ -22,9 +22,11 @@ if str(REPO_ROOT / "src") not in sys.path:
 from openmrr import (
     MATERIAL_CATALOG,
     MRRDesignConfig,
+    RESIST_TONE_CATALOG,
     T_REF_K,
     WaveguideCrossSectionSpec,
     agent_design_mrr,
+    agent_fab_tolerance,
     agent_fit_spectrum,
     agent_inspect_gds,
     agent_status,
@@ -32,6 +34,7 @@ from openmrr import (
     analyze_uploaded_gds,
     create_initial_session,
     detect_hardware_profile,
+    export_fab_bias_array_gds,
     export_mrr_gds,
     export_sweep_array_gds,
     fit_single_resonance_cmt,
@@ -40,6 +43,7 @@ from openmrr import (
     process_chat_turn,
     q_int_to_loss_db_per_cm,
     run_compute_benchmark,
+    run_fabrication_error_analysis,
     run_mrr_parameter_sweep,
     run_waveguide_width_sweep,
     simulate_mrr_topology,
@@ -335,7 +339,7 @@ def test_agent_tools_and_mcp_minimal_tokens() -> None:
     init_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     assert init_resp is not None and init_resp["result"]["serverInfo"]["name"] == "openmrr-studio"
     list_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    assert list_resp is not None and len(list_resp["result"]["tools"]) == 6
+    assert list_resp is not None and len(list_resp["result"]["tools"]) == 7
 
     # 2. Compact MCP design + critical coupling + GDS export (< 550 chars => < ~140 tokens!)
     call_resp = handle_mcp_request({
@@ -452,6 +456,106 @@ def test_multiband_vis_1310_midir_and_warnings() -> None:
     assert bad_vis["metrics"]["Q_int"] < 5000
 
 
+def test_fabrication_dose_and_pr_tolerance() -> None:
+    assert {"positive_pr", "negative_pr", "direct_cd"}.issubset(RESIST_TONE_CATALOG.keys())
+    cfg = MRRDesignConfig(
+        topology="point_circular_ap",
+        core_material="Si",
+        film_height_um=0.22,
+        ring_width_um=0.48,
+        bus_width_um=0.45,
+        ring_radius_um=15.0,
+        gap_thru_um=0.18,
+        wavelength_nm=1550.0,
+    )
+
+    # 1. Positive PR: over-dose (+15%, last corner) shrinks W, widens gap, blue-shifts lambda_0
+    pos = run_fabrication_error_analysis(cfg, resist_tone="positive_pr", max_dose_error_pct=15.0, num_points=5)
+    pos_over = pos["corners"][-1]
+    assert pos_over["dose_error_pct"] > 0 and pos_over["delta_cd_nm"] < -15.0
+    assert pos_over["gap_fab_um"] > 0.18
+    assert pos_over["delta_wl_res_nm"] < -0.5
+
+    # 2. Negative PR: over-dose (+15%, last corner) blooms W, shrinks gap, red-shifts lambda_0
+    neg = run_fabrication_error_analysis(cfg, resist_tone="negative_pr", max_dose_error_pct=15.0, num_points=5)
+    neg_over = neg["corners"][-1]
+    assert neg_over["dose_error_pct"] > 0 and neg_over["delta_cd_nm"] > 15.0
+    assert neg_over["gap_fab_um"] < 0.18
+    assert neg_over["delta_wl_res_nm"] > 0.5
+    assert len(neg["corner_spectra"]["nominal"]["detuning_pm"]) > 100
+
+    # 3. 5-cell pre-biased GDS + Copilot + HTTP + MCP integration
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        gds_meta = export_fab_bias_array_gds(cfg, tmp_path / "opc_bias_test.gds")
+        assert Path(gds_meta["gds_path"]).is_file()
+        assert Path(gds_meta["lyp_path"]).is_file()
+        assert gds_meta["num_cells"] == 5 and len(gds_meta["cells"]) == 5
+
+        s0 = create_initial_session(lang="en")
+        c_fab = process_chat_turn(
+            s0,
+            "check over dose or under dose nagetive PR +/- 15%",
+            gds_export_dir=tmp_path,
+        )
+        assert c_fab["ui_view"] == "fab"
+        assert c_fab["fab_result"]["resist_tone"] == "negative_pr"
+
+        c_opc = process_chat_turn(
+            c_fab["session"],
+            "Export 5-cell pre-biased GDS",
+            gds_export_dir=tmp_path,
+        )
+        assert "gds_export" in c_opc and Path(c_opc["gds_export"]["gds_path"]).is_file()
+
+        async def _check_http() -> None:
+            old_exp = srv.GDS_EXPORT_DIR
+            srv.GDS_EXPORT_DIR = tmp_path / "srv_exp"
+            try:
+                st, b_fab = await _asgi_request(
+                    "POST",
+                    "/api/fab_tolerance",
+                    json_body={"config": asdict(cfg), "resist_tone": "positive_pr", "max_dose_error_pct": 12.0, "num_points": 5},
+                )
+                assert st == 200 and json.loads(b_fab)["resist_tone"] == "positive_pr"
+                st2, b_gds = await _asgi_request(
+                    "POST",
+                    "/api/export_fab_gds",
+                    json_body={"config": asdict(cfg)},
+                )
+                assert st2 == 200 and "gds_download_url" in json.loads(b_gds)
+            finally:
+                srv.GDS_EXPORT_DIR = old_exp
+
+        asyncio.run(_check_http())
+
+    mcp_fab = handle_mcp_request({
+        "jsonrpc": "2.0",
+        "id": 99,
+        "method": "tools/call",
+        "params": {
+            "name": "openmrr_fab_tolerance",
+            "arguments": {
+                "mat": "Si",
+                "h_um": 0.22,
+                "w_ring_um": 0.48,
+                "w_bus_um": 0.45,
+                "r_um": 15.0,
+                "gap_um": 0.18,
+                "resist": "positive_pr",
+                "dose_pct": 15.0,
+                "num_points": 5,
+                "export_bias_gds": True,
+            },
+        },
+    })
+    assert mcp_fab is not None and not mcp_fab["result"]["isError"]
+    mcp_txt = mcp_fab["result"]["content"][0]["text"]
+    assert len(mcp_txt) < 620
+    mcp_json = json.loads(mcp_txt)
+    assert Path(mcp_json["csv"]).is_file() and Path(mcp_json["bias_gds"]).is_file()
+
+
 def main() -> None:
     tests = [
         ("Materials & Hardware Probe", test_materials_and_hardware),
@@ -463,9 +567,10 @@ def main() -> None:
         ("HTTP ASGI Endpoints & GDS Upload/Download", test_http_endpoints_and_gds_upload),
         ("Token-Minimal Codex/Claude Agent CLI & MCP Server", test_agent_tools_and_mcp_minimal_tokens),
         ("Multi-Waveband Physics (Visible 532nm / O-Band 1310nm / Mid-IR 4.2um)", test_multiband_vis_1310_midir_and_warnings),
+        ("Cleanroom Lithography Positive/Negative PR Dose & OPC Bias GDS", test_fabrication_dose_and_pr_tolerance),
     ]
     print("=" * 72)
-    print("Running OpenMRR Studio v3.0 Full Verification Suite")
+    print("Running OpenMRR Studio v3.3.0 Full Verification Suite")
     print("=" * 72)
     for label, fn in tests:
         print(f"[RUN ] {label} ...", flush=True)

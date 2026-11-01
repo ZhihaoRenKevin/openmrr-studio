@@ -1,10 +1,11 @@
 """OpenMRR Studio (`openmrr`) — License-Free Photonics Eigenmode, CMT & GDSII Suite."""
 from __future__ import annotations
 
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 from .agent_tools import (
     agent_design_mrr,
+    agent_fab_tolerance,
     agent_fit_spectrum,
     agent_inspect_gds,
     agent_status,
@@ -23,6 +24,11 @@ from .eigenmode_solver import (
     WaveguideCrossSectionSpec,
     solve_modes_fde_tidy3d,
     solve_modes_fem,
+)
+from .fab_tolerance import (
+    RESIST_TONE_CATALOG,
+    export_fab_bias_array_gds,
+    run_fabrication_error_analysis,
 )
 from .gds_bridge import (
     OPENMRR_LAYERS,
@@ -59,6 +65,7 @@ __all__ = [
     "__version__",
     "MATERIAL_CATALOG",
     "OPENMRR_LAYERS",
+    "RESIST_TONE_CATALOG",
     "TOPOLOGY_CATALOG",
     "T_REF_K",
     "WAVEBAND_PRESETS",
@@ -67,6 +74,7 @@ __all__ = [
     "MRRDesignConfig",
     "WaveguideCrossSectionSpec",
     "agent_design_mrr",
+    "agent_fab_tolerance",
     "agent_fit_spectrum",
     "agent_inspect_gds",
     "agent_status",
@@ -78,6 +86,7 @@ __all__ = [
     "create_initial_session",
     "detect_hardware_profile",
     "evaluate_material_dispersion_table",
+    "export_fab_bias_array_gds",
     "export_mrr_gds",
     "export_sweep_array_gds",
     "fit_multi_resonance_spectrum",
@@ -88,6 +97,7 @@ __all__ = [
     "process_chat_turn",
     "q_int_to_loss_db_per_cm",
     "run_compute_benchmark",
+    "run_fabrication_error_analysis",
     "run_mrr_parameter_sweep",
     "run_waveguide_width_sweep",
     "scale_preset_for_wavelength",

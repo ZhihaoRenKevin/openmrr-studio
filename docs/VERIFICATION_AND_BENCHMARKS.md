@@ -9,7 +9,7 @@ Scientific credibility requires stating exact physical equations, independent cr
 Reproducible locally with zero commercial licenses via:
 
 ```bash
-uv run python benchmarks/lumerical_validation/generate_and_audit_benchmarks.py
+python benchmarks/generate_and_audit_benchmarks.py
 ```
 
 This benchmark solves the **exact same 2D cylindrical bent waveguide cross-sections** across **five integrated-photonics wavebands** (`Visible 532 nm`, `VNIR 780 nm`, `O-Band 1310 nm`, `C-Band 1550 nm`, and `Mid-IR 4200 nm`) using two mathematically independent Maxwell discretizations:
@@ -36,13 +36,13 @@ On a workstation equipped with Ansys Lumerical (`lumapi`), execute a head-to-hea
 
 ```bash
 # Step 1: Export canonical benchmark specifications & .gds masks
-uv run python benchmarks/lumerical_validation/generate_and_audit_benchmarks.py
+python benchmarks/generate_and_audit_benchmarks.py
 
 # Step 2: Run head-to-head Ansys Lumerical MODE FDE + 3D FDTD comparison
-python benchmarks/lumerical_validation/run_lumapi_validation.py
+python benchmarks/run_lumapi_validation.py
 ```
 
-This generates `benchmarks/lumerical_validation/outputs/lumerical_vs_openmrr_validation.csv` and `LUMERICAL_VALIDATION_REPORT.md` with matched diagonal refractive index tensors `(nx, ny, nz)`, sidewall angles, slab heights, and fundamental-mode port expansions (`|S21|^2`).
+This generates `benchmarks/outputs/lumerical_vs_openmrr_validation.csv` and `LUMERICAL_VALIDATION_REPORT.md` with matched diagonal refractive index tensors `(nx, ny, nz)`, sidewall angles, slab heights, and fundamental-mode port expansions (`|S21|^2`).
 
 ---
 

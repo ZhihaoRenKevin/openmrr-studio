@@ -1,4 +1,4 @@
-"""Native Desktop & Browser Application Launcher for `OpenMRR Studio v3.2`.
+"""Native Desktop & Browser Application Launcher for `OpenMRR Studio v3.3`.
 
 Starts the local `127.0.0.1` Starlette/Uvicorn server in a background daemon thread
 and opens either:
@@ -26,6 +26,11 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 import uvicorn
+
+if not getattr(sys, "frozen", False):
+    _src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _src_dir not in sys.path:
+        sys.path.insert(0, _src_dir)
 
 try:
     from openmrr.app_server import app

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openmrr-studio"
-version = "3.2.0"
-description = "License-free conversational photonics microring designer (Visible 400 nm to Mid-IR 14 um): 2D full-vector Maxwell eigenmodes, spatial/temporal CMT, lab spectrum fitting, bidirectional GDSII layout bridge, and token-minimal AI agent MCP — without Lumerical, RSoft, or COMSOL."
+version = "3.3.0"
+description = "License-free conversational photonics microring designer (Visible 400 nm to Mid-IR 14 um): 2D full-vector Maxwell eigenmodes, spatial/temporal CMT, cleanroom PR dose & CD-bias tolerance analysis, lab spectrum fitting, and bidirectional GDSII bridge without Lumerical, RSoft, or COMSOL."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -18,6 +18,8 @@ keywords = [
   "eigenmode-solver",
   "coupled-mode-theory",
   "gdsii",
+  "klayout",
+  "lithography",
   "silicon-photonics",
   "silicon-nitride",
   "silicon-carbide",

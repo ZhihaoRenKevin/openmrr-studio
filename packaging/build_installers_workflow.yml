@@ -27,6 +27,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[desktop]" pillow pyinstaller
 
+      - name: Run 10-Suite Verification Tests
+        run: python tests/test_openmrr_all.py
+
       - name: Build & Smoke-Test macOS .app + .dmg
         run: python -m openmrr.build_standalone --target macos
 

@@ -4,11 +4,11 @@ Builds native standalone `OpenMRR Studio` desktop installers with zero Python se
 and zero GPL dependencies required on end-user machines:
   - macOS Apple Silicon / Intel:
       python -m openmrr.build_standalone --target macos
-      -> dist/OpenMRR-Studio-v3.2.0-macOS-AppleSilicon.dmg (Drag-to-Applications .dmg)
+      -> dist/OpenMRR-Studio-v3.3.0-macOS-AppleSilicon.dmg (Drag-to-Applications .dmg)
   - Windows 10/11 (CPU or CUDA):
       python -m openmrr.build_standalone --target windows-cpu
-      -> dist/OpenMRR-Studio-v3.2.0-Windows-Setup-x64.exe (Inno Setup Wizard Installer)
-      -> dist/OpenMRR-Studio-v3.2.0-Windows-Portable-x64.zip (Portable unzip-and-run)
+      -> dist/OpenMRR-Studio-v3.3.0-Windows-Setup-x64.exe (Inno Setup Wizard Installer)
+      -> dist/OpenMRR-Studio-v3.3.0-Windows-Portable-x64.zip (Portable unzip-and-run)
 """
 from __future__ import annotations
 
@@ -21,10 +21,14 @@ import shutil
 import subprocess
 import sys
 
+_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 try:
     from openmrr import __version__ as APP_VERSION
 except Exception:
-    APP_VERSION = "3.2.0"
+    APP_VERSION = "3.3.0"
 
 
 def generate_app_icons(pkg_dir: Path) -> tuple[Path | None, Path | None]:
@@ -174,6 +178,9 @@ def _package_macos_dmg(repo_root: Path, app_bundle: Path) -> Path:
         check=True,
     )
     shutil.rmtree(stage_dir, ignore_errors=True)
+    # Clean duplicate unpacked PyInstaller directory and intermediate build/ folder to save ~600 MB disk space
+    shutil.rmtree(repo_root / "dist" / "OpenMRR Studio", ignore_errors=True)
+    shutil.rmtree(repo_root / "build", ignore_errors=True)
     print(f"[OpenMRR Builder] Created macOS installer DMG: {dmg_path}")
     return dmg_path
 

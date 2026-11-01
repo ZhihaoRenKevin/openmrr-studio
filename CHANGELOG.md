@@ -2,6 +2,19 @@
 
 All notable changes to **OpenMRR Studio** are documented in this file.
 
+## [3.3.0] - 2026-11-01
+
+### Added
+- **Cleanroom Lithography Over-Dose / Under-Dose (`Positive PR` vs `Negative PR`) & CD-Bias Error Engine (`fab_tolerance.py`)**:
+  - Coupled 2D conformal vector FEM + spatial CMT corner evaluator (`run_fabrication_error_analysis`) modeling resist-tone physics (`Positive PR`: ZEP520A / PMMA / KrF / ArF where over-dose shrinks $W$ and widens $\mathrm{gap}$, shifting resonators under-coupled and blue-shifting $\lambda_0$; `Negative PR`: HSQ / ma-N 2403 / SU-8 where over-dose blooms $W$ and shrinks $\mathrm{gap}$, shifting resonators over-coupled, red-shifting $\lambda_0$, and flagging sub-`80 nm` gap bridging / RIE lag).
+  - Reports `ER >= 15 dB` and `ER >= 10 dB` CD & exposure-dose yield windows, resonance wavelength sensitivity $d\lambda_0/d\mathrm{CD}$ (`pm/nm`), TiN microheater $\Delta T$ thermal trim budget, and 3-corner overlaid resonance dips.
+  - Added `export_fab_bias_array_gds` to generate 5-cell pre-biased mask compensation brackets (`ΔCD_drawn = [-20, -10, 0, +10, +20] nm`, adjusting both $W + \delta$ and $\mathrm{gap} - \eta\delta$) + KLayout `.lyp`.
+  - Integrated across the Desktop/Web UI (`🧪 Fab & Dose` tab + Retina 2x dual-axis canvas plots), Bilingual Copilot (`EN | 中文` natural-language queries), Agent CLI (`openmrr agent fab-tolerance`), MCP server (`openmrr_fab_tolerance`), and cookbook script `examples/01_devices_and_sweeps/04_lithography_dose_pr_tolerance.py`.
+
+### Changed
+- **Clean Repository Organization**:
+  - Consolidated secondary documentation (`README_zh-CN.md`, `CONTRIBUTING.md`, `llms.txt`) into `docs/`, flattened validation and figure scripts into `benchmarks/`, and streamlined `packaging/` and top-level root around [`AGENTS.md`](./AGENTS.md) and [`.mcp.json`](./.mcp.json).
+
 ## [3.2.0] - 2026-10-31
 
 ### Added

@@ -17,6 +17,7 @@ import traceback
 from . import __version__
 from .agent_tools import (
     agent_design_mrr,
+    agent_fab_tolerance,
     agent_fit_spectrum,
     agent_inspect_gds,
     agent_status,
@@ -119,6 +120,28 @@ MCP_TOOLS = [
             "required": ["csv_path"],
         },
     },
+    {
+        "name": "openmrr_fab_tolerance",
+        "description": "Analyze cleanroom lithography over-dose/under-dose (positive_pr vs negative_pr) and CD-bias errors on ER, Q_L, and resonance shift; optional pre-biased OPC .gds array.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "resist": {"type": "string", "description": "positive_pr, negative_pr, or direct_cd"},
+                "dose_pct": {"type": "number", "description": "Max exposure dose error [+/- %]"},
+                "slope_nm_pct": {"type": "number", "description": "CD shift slope [nm per % dose]"},
+                "cd_nm": {"type": "number", "description": "Max CD bias [nm] when resist=direct_cd"},
+                "top": {"type": "string"},
+                "mat": {"type": "string"},
+                "h_um": {"type": "number"},
+                "w_ring_um": {"type": "number"},
+                "w_bus_um": {"type": "number"},
+                "r_um": {"type": "number"},
+                "gap_um": {"type": "number"},
+                "apply_cc": {"type": "boolean"},
+                "export_bias_gds": {"type": "boolean"},
+            },
+        },
+    },
 ]
 
 _DISPATCH = {
@@ -128,6 +151,7 @@ _DISPATCH = {
     "openmrr_sweep_mrr": agent_sweep_mrr,
     "openmrr_inspect_gds": agent_inspect_gds,
     "openmrr_fit_spectrum": agent_fit_spectrum,
+    "openmrr_fab_tolerance": agent_fab_tolerance,
 }
 
 

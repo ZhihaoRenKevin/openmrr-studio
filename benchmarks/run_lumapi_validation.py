@@ -13,7 +13,7 @@ Guarantees strict apples-to-apples physics matching:
   - 3D FDTD coupler simulation enforces `auto shutoff min = 1e-5` before reading modal port `S` matrix.
 
 Usage on Windows / Lumerical Workstation:
-  python benchmarks/lumerical_validation/run_lumapi_validation.py
+  python benchmarks/run_lumapi_validation.py
 """
 from __future__ import annotations
 

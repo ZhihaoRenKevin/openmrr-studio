@@ -8,6 +8,11 @@ dist/
 build/
 *.spec
 packaging/openmrr.iconset/
+packaging/*.icns
+packaging/*.ico
+packaging/*.png
+benchmarks/outputs/
+docs/images/*.svg
 .venv/
 venv/
 
@@ -17,7 +22,19 @@ outputs/
 *.fsp
 *.lms
 
-# Keep curated docs/images hero figures, ignore ad-hoc scratch
+# Strict privacy lock: never track personal skills, vaults, or local agent folders
+skills/
+.skills/
+.agents/
+.claude/
+.codex/
+.gemini/
+*SKILL.md
+CLAUDE.md
+MEMORY.md
+DISPATCH.md
+
+# Local caches & OS files
 .pytest_cache/
 .ruff_cache/
 .DS_Store

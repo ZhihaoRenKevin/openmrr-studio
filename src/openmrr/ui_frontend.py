@@ -462,6 +462,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         <button class="stage-pill" id="pill-mrr" onclick="setStageView('mrr')" data-i18n="pill_mrr">📊 Ring Spectrum</button>
         <button class="stage-pill" id="pill-gds" onclick="setStageView('gds')" data-i18n="pill_gds">📐 GDS Mask</button>
         <button class="stage-pill" id="pill-fit" onclick="setStageView('fit')" data-i18n="pill_fit">📈 Loss &amp; Q Fit</button>
+        <button class="stage-pill" id="pill-fab" onclick="setStageView('fab'); if(!lastFabResult) runFabToleranceUI();" data-i18n="pill_fab">🧪 Fab &amp; Dose</button>
       </div>
       <span class="stage-status" id="spec-status" data-i18n="status_ready">Ready · 400 nm – 14 µm</span>
     </div>
@@ -596,6 +597,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
 
         <div class="action-bar">
           <button class="btn green sm" onclick="sendChatPrompt(currentLang==='zh'?'临界耦合':'Apply critical coupling')" data-i18n="mrr_btn_cc">⚡ Apply Critical Coupling</button>
+          <button class="btn sm" onclick="setStageView('fab'); runFabToleranceUI();" data-i18n="mrr_btn_fab">🧪 Fab / PR Dose Error</button>
           <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描间距':'Sweep gap')" data-i18n="mrr_btn_sw_gap">📏 Sweep Gap</button>
           <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描损耗':'Sweep propagation loss')" data-i18n="mrr_btn_sw_loss">📉 Sweep Loss (dB/cm)</button>
           <button class="btn primary sm" onclick="sendChatPrompt(currentLang==='zh'?'导出单个 GDS 版图':'Export single GDS layout')" data-i18n="mrr_btn_gds">💾 Export .GDS Mask</button>
@@ -743,6 +745,106 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         </div>
       </div>
 
+      <!-- ==================== STAGE 6: CLEANROOM LITHOGRAPHY & PR DOSE TOLERANCE ==================== -->
+      <div class="stage-view" id="view-fab">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="fab_card_title">Cleanroom Lithography Over-Dose / Under-Dose (Positive vs. Negative PR) &amp; CD Bias Analysis</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn primary sm" onclick="runFabToleranceUI()" data-i18n="fab_btn_run">▶ Analyze Fab Error</button>
+              <button class="btn green sm" onclick="exportFabBiasGdsUI()" data-i18n="fab_btn_gds">🗂️ Export 5-Cell Pre-Biased .GDS</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:2.1fr repeat(4,1fr);gap:10px;align-items:end;">
+            <div class="field">
+              <label data-i18n="fab_lbl_resist">Photoresist / Lithography Polarity</label>
+              <select id="fab-resist" onchange="onFabResistChange()">
+                <option value="positive_pr" data-i18n="fab_opt_pos">Positive PR (ZEP / CSAR / PMMA / KrF-ArF DUV)</option>
+                <option value="negative_pr" data-i18n="fab_opt_neg">Negative PR (HSQ / ma-N / SU-8 / Lift-Off)</option>
+                <option value="direct_cd" data-i18n="fab_opt_cd">Direct Foundry CD Bias (ΔCD [nm])</option>
+              </select>
+            </div>
+            <div class="field">
+              <label id="fab-lbl-span" data-i18n="fab_lbl_dose">Max Dose Error [±%]</label>
+              <input id="fab-dose-pct" type="number" step="1" value="15"/>
+            </div>
+            <div class="field">
+              <label data-i18n="fab_lbl_slope">CD Slope [nm / %]</label>
+              <input id="fab-slope" type="number" step="0.2" value="2.0"/>
+            </div>
+            <div class="field">
+              <label data-i18n="fab_lbl_prox">Gap Proximity η</label>
+              <input id="fab-prox" type="number" step="0.05" value="1.05"/>
+            </div>
+            <div class="field">
+              <label data-i18n="fab_lbl_dh">Film ΔH [±nm]</label>
+              <input id="fab-dh" type="number" step="1" value="0"/>
+            </div>
+          </div>
+          <div id="fab-mech-banner" style="margin-top:10px;padding:9px 12px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.28);font-size:12px;color:#cbd5e1;line-height:1.5;">
+            Select <strong>Positive PR</strong> or <strong>Negative PR</strong> and click <strong>▶ Analyze Fab Error</strong> to evaluate simultaneous waveguide width <code>W ± ΔCD</code> and anti-correlated gap <code>g ∓ η·ΔCD</code> shifts via 2D FEM + Spatial CMT.
+          </div>
+          <div id="fab-drc-banner" class="warn-banner" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="kpi-row four">
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fab_kpi1">ER ≥ 15 dB Yield Window</div>
+            <div class="kpi-val green" id="fab-kpi-win">-- nm</div>
+            <div class="kpi-sub" id="fab-kpi-win-sub">Dose window: -- %</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fab_kpi2">Over-Dose (+Max) Corner</div>
+            <div class="kpi-val amber" id="fab-kpi-over">-- dB</div>
+            <div class="kpi-sub" id="fab-kpi-over-sub">ΔCD -- nm · gap -- nm</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fab_kpi3">Under-Dose (-Max) Corner</div>
+            <div class="kpi-val cyan" id="fab-kpi-under">-- dB</div>
+            <div class="kpi-sub" id="fab-kpi-under-sub">ΔCD -- nm · gap -- nm</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="fab_kpi4">Resonance CD Sensitivity</div>
+            <div class="kpi-val" id="fab-kpi-slope">-- pm/nm</div>
+            <div class="kpi-sub" id="fab-kpi-heater">Heater trim: -- K / 10nm</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" data-i18n="fab_plot1_title">Extinction Ratio &amp; Resonance Shift vs. Exposure Dose / CD</span>
+              <span class="card-sub" data-i18n="fab_plot1_sub">Green Band = ER ≥ 15 dB Yield Window</span>
+            </div>
+            <canvas class="plot-cv" id="cv-fab-er"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" data-i18n="fab_plot2_title">3-Corner Overlaid Resonance Dips</span>
+              <span class="card-sub" data-i18n="fab_plot2_sub">Under-Dose vs. Nominal vs. Over-Dose</span>
+            </div>
+            <canvas class="plot-cv" id="cv-fab-dips"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="fab_tbl_title">Corner-by-Corner Lithography &amp; Coupling Breakdown</span>
+            <span class="card-sub" id="fab-opc-sub">Anti-Correlated W_fab = W + ΔCD, gap_fab = gap - η·ΔCD</span>
+          </div>
+          <table class="clean-tbl" id="fab-table">
+            <thead>
+              <tr>
+                <th>Dose Error</th><th>ΔCD [nm]</th><th>W_ring [nm]</th><th>Gap_fab [nm]</th>
+                <th>ER [dB]</th><th>Loaded Q_L</th><th>Δλ_res [nm]</th><th>Regime / DRC</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -844,6 +946,7 @@ let lastWidthSweep = null;
 let currentGdsView = null;
 let labSpectrumData = null;
 let lastExtractedLossDbCm = null;
+let lastFabResult = null;
 let aiBackendStatus = { offline: true, ollama_available: false, claude_cli_available: false, claude_env_key: false, codex_cli_available: false, codex_env_key: false };
 
 const UI_I18N = {
@@ -858,7 +961,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 Online · Codex / OpenAI (CLI / API)',
     chat_placeholder: "Type an answer or spec (e.g. 'loss = 0.8 dB/cm, FSR 150 GHz, pulley')...",
     btn_send: 'Send →',
-    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit',
+    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit', pill_fab: '🧪 Fab & Dose',
     status_ready: 'Ready · 400 nm – 14 µm',
     wf1_title: '1. Design a New Ring Step-by-Step',
     wf1_desc: 'Answer one simple question at a time — waveband, material, wafer stack, propagation loss (<code>dB/cm</code>), and target FSR.',
@@ -872,7 +975,7 @@ const UI_I18N = {
     mode_lbl_sm: 'Single-Mode Max Width', mode_lbl_wbus: 'Recommended Bus W', mode_lbl_wring: 'Recommended Ring W', mode_lbl_neff: 'Fundamental Mode',
     mode_card_field: '2D Vector Eigenmode Field', mode_card_cutoff: 'Waveguide Width Dispersion & Cutoff',
     mrr_lbl_fsr: 'Free Spectral Range', mrr_lbl_loss: 'Prop. Loss α & Q_int', mrr_lbl_ql: 'Loaded Q Factor', mrr_lbl_er: 'Extinction Ratio', mrr_lbl_cc: 'Critical Coupling',
-    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
+    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_fab: '🧪 Fab / PR Dose Error', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
     mrr_btn_gds: '💾 Export .GDS Mask', mrr_btn_csv: '📥 Download Spectrum .CSV',
     mrr_card_spec: 'Broadband Transmission Spectrum', mrr_card_coupler: 'Coupler Critical-Coupling Synthesis', mrr_card_schem: 'Resonator & Cross-Section Schematic',
     gds_btn_up: '📂 Upload .GDS / .OAS', gds_btn_single: '💾 Generate Single .GDS', gds_btn_array: '🗂️ Generate 5-Ring Sweep Array .GDS',
@@ -886,7 +989,18 @@ const UI_I18N = {
     fit_intro: 'Upload a two-column <code>wavelength_nm, transmission</code> file (linear power OR <code>dB</code>/<code>dBm</code>) to extract propagation loss <code>α [dB/cm]</code> and intrinsic <code>Q_int</code>.',
     fit_plot_title: 'Measured Spectrum vs. Analytical CMT Fit', fit_plot_sub: 'Supports Linear Power & dB/dBm Traces',
     exp_title: '⚙ Expert Parameter Workbench', exp_sub: 'Direct numerical override, 24-material dispersion & hardware benchmark',
-    exp_close: '✕ Close', exp_override: 'Manual Geometry, Waveband & Loss Override', exp_solve: '▶ Solve & Update'
+    exp_close: '✕ Close', exp_override: 'Manual Geometry, Waveband & Loss Override', exp_solve: '▶ Solve & Update',
+    fab_card_title: 'Cleanroom Lithography Over-Dose / Under-Dose (Positive vs. Negative PR) & CD Bias Analysis',
+    fab_btn_run: '▶ Analyze Fab Error', fab_btn_gds: '🗂️ Export 5-Cell Pre-Biased .GDS',
+    fab_lbl_resist: 'Photoresist / Lithography Polarity',
+    fab_opt_pos: 'Positive PR (ZEP / CSAR / PMMA / KrF-ArF DUV)',
+    fab_opt_neg: 'Negative PR (HSQ / ma-N / SU-8 / Lift-Off)',
+    fab_opt_cd: 'Direct Foundry CD Bias (ΔCD [nm])',
+    fab_lbl_dose: 'Max Dose Error [±%]', fab_lbl_slope: 'CD Slope [nm / %]', fab_lbl_prox: 'Gap Proximity η', fab_lbl_dh: 'Film ΔH [±nm]',
+    fab_kpi1: 'ER ≥ 15 dB Yield Window', fab_kpi2: 'Over-Dose (+Max) Corner', fab_kpi3: 'Under-Dose (-Max) Corner', fab_kpi4: 'Resonance CD Sensitivity',
+    fab_plot1_title: 'Extinction Ratio & Resonance Shift vs. Exposure Dose / CD', fab_plot1_sub: 'Green Band = ER ≥ 15 dB Yield Window',
+    fab_plot2_title: '3-Corner Overlaid Resonance Dips', fab_plot2_sub: 'Under-Dose vs. Nominal vs. Over-Dose',
+    fab_tbl_title: 'Corner-by-Corner Lithography & Coupling Breakdown'
   },
   zh: {
     step1: '选择目标', step2: '工作波段', step3: '芯层材料', step4: '叠层与模式', step5: '损耗与微环', step6: '耦合优化与版图',
@@ -899,7 +1013,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 在线模式 · Codex / OpenAI (CLI / API)',
     chat_placeholder: '输入您的需求或参数（例如：损耗 0.8 dB/cm, FSR 150 GHz, 滑轮耦合）...',
     btn_send: '发送 →',
-    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合',
+    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合', pill_fab: '🧪 工艺与剂量',
     status_ready: '就绪 · 400 nm – 14 µm',
     wf1_title: '1. 逐步引导设计新微环',
     wf1_desc: '每次只问一个清晰问题——工作波段、波导材料、晶圆叠层、传播损耗 (<code>dB/cm</code>) 与目标 FSR。',
@@ -913,7 +1027,7 @@ const UI_I18N = {
     mode_lbl_sm: '单模最大截止宽度', mode_lbl_wbus: '推荐直波导宽 W_bus', mode_lbl_wring: '推荐微环宽 W_ring', mode_lbl_neff: '基模有效折射率',
     mode_card_field: '二维全矢量本征模场分布', mode_card_cutoff: '波导宽度色散与单模截止曲线',
     mrr_lbl_fsr: '自由光谱范围 FSR', mrr_lbl_loss: '传播损耗 α 与本征 Q', mrr_lbl_ql: '有载品质因数 Q_L', mrr_lbl_er: '谐振消光比 ER', mrr_lbl_cc: '临界耦合目标参数',
-    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
+    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_fab: '🧪 正/负胶曝光容差', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
     mrr_btn_gds: '💾 导出 .GDS 掩膜版图', mrr_btn_csv: '📥 下载光谱 .CSV',
     mrr_card_spec: '宽谱透射与下载光谱', mrr_card_coupler: '耦合器临界耦合综合曲线', mrr_card_schem: '微环拓扑与波导截面示意图',
     gds_btn_up: '📂 上传 .GDS / .OAS', gds_btn_single: '💾 生成单器件 .GDS', gds_btn_array: '🗂️ 生成 5 环容差阵列 .GDS',
@@ -927,7 +1041,18 @@ const UI_I18N = {
     fit_intro: '上传两列 <code>wavelength_nm, transmission</code> 数据（支持线性透过率或 <code>dB</code>/<code>dBm</code>），一键提取波导传播损耗 <code>α [dB/cm]</code> 与 <code>Q_int</code>。',
     fit_plot_title: '实验测量光谱 vs. 解析耦合模 (CMT) 拟合曲线', fit_plot_sub: '自动兼容线性功率与 dB/dBm 光谱',
     exp_title: '⚙ 专家参数工作台', exp_sub: '直接数值覆盖、24 种跨波段材料色散库与硬件算力基准测试',
-    exp_close: '✕ 关闭', exp_override: '手动几何、波长与损耗覆盖', exp_solve: '▶ 求解并更新'
+    exp_close: '✕ 关闭', exp_override: '手动几何、波长与损耗覆盖', exp_solve: '▶ 求解并更新',
+    fab_card_title: '超净间光刻过曝光 / 欠曝光（正胶 vs. 负胶）与线宽偏置容差分析',
+    fab_btn_run: '▶ 运行工艺误差分析', fab_btn_gds: '🗂️ 导出 5 单元预偏置补偿 .GDS',
+    fab_lbl_resist: '光刻胶极性 / 曝光工艺模式',
+    fab_opt_pos: '正性光刻胶 Positive PR (ZEP / CSAR / PMMA / DUV 正胶)',
+    fab_opt_neg: '负性光刻胶 Negative PR (HSQ / ma-N / SU-8 / 剥离反转)',
+    fab_opt_cd: '代工厂线宽偏置直接扫描 (ΔCD [nm])',
+    fab_lbl_dose: '最大剂量误差 [±%]', fab_lbl_slope: '线宽斜率 [nm / %]', fab_lbl_prox: '窄缝邻近因子 η', fab_lbl_dh: '膜厚误差 ΔH [±nm]',
+    fab_kpi1: 'ER ≥ 15 dB 良率窗口', fab_kpi2: '过曝光 (+Max) 极值点', fab_kpi3: '欠曝光 (-Max) 极值点', fab_kpi4: '谐振波长线宽灵敏度',
+    fab_plot1_title: '消光比与谐振漂移随曝光剂量 / 线宽变化曲线', fab_plot1_sub: '绿色阴影 = ER ≥ 15 dB 良率窗口',
+    fab_plot2_title: '欠曝光 / 标称 / 过曝光三态谐振峰线型对比', fab_plot2_sub: '中心对齐相对失谐对比',
+    fab_tbl_title: '逐曝光梯度工艺线宽、耦合间距与光学指标明细表'
   }
 };
 
@@ -1009,6 +1134,7 @@ function setStageView(viewName) {
     }
     if (viewName === 'gds' && currentGdsView) drawGdsCanvas();
     if (viewName === 'fit' && labSpectrumData) runCmtFitUI();
+    if (viewName === 'fab' && lastFabResult) renderFabResult(lastFabResult);
   }, 25);
 }
 
@@ -1346,6 +1472,11 @@ async function sendChatPrompt(promptText) {
     }
     if (data.gds_export) {
       showGdsExportResult(data.gds_export);
+    }
+    if (data.fab_result) {
+      lastFabResult = data.fab_result;
+      document.getElementById('fab-resist').value = data.fab_result.resist_tone || 'positive_pr';
+      renderFabResult(data.fab_result);
     }
   } catch (err) {
     thinking.remove();
@@ -2016,6 +2147,242 @@ function exportSpectrumCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = 'openmrr_spectrum.csv';
   a.click();
+}
+
+// ==================== LITHOGRAPHY DOSE & PR FABRICATION TOLERANCE ====================
+function onFabResistChange() {
+  const r = document.getElementById('fab-resist').value;
+  const lbl = document.getElementById('fab-lbl-span');
+  if (r === 'negative_pr') {
+    document.getElementById('fab-prox').value = '1.15';
+    lbl.textContent = currentLang === 'zh' ? '最大剂量误差 [±%]' : 'Max Dose Error [±%]';
+    document.getElementById('fab-dose-pct').value = '15';
+  } else if (r === 'positive_pr') {
+    document.getElementById('fab-prox').value = '1.05';
+    lbl.textContent = currentLang === 'zh' ? '最大剂量误差 [±%]' : 'Max Dose Error [±%]';
+    document.getElementById('fab-dose-pct').value = '15';
+  } else {
+    document.getElementById('fab-prox').value = '1.00';
+    lbl.textContent = currentLang === 'zh' ? '最大线宽偏置 [±nm]' : 'Max CD Bias [±nm]';
+    document.getElementById('fab-dose-pct').value = '30';
+  }
+  runFabToleranceUI();
+}
+
+async function runFabToleranceUI() {
+  const cfg = readConfigFromForm();
+  const resist = document.getElementById('fab-resist').value || 'positive_pr';
+  const spanVal = parseFloat(document.getElementById('fab-dose-pct').value) || 15.0;
+  const slope = parseFloat(document.getElementById('fab-slope').value) || 2.0;
+  const prox = parseFloat(document.getElementById('fab-prox').value) || 1.05;
+  const dh = parseFloat(document.getElementById('fab-dh').value) || 0.0;
+  document.getElementById('spec-status').textContent = currentLang === 'zh' ? '正在计算光刻剂量容差...' : 'Solving PR dose corners...';
+  try {
+    const r = await fetch('/api/fab_tolerance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: cfg,
+        resist_tone: resist,
+        max_dose_error_pct: spanVal,
+        max_cd_bias_nm: spanVal,
+        dose_slope_nm_per_pct: slope,
+        proximity_gap_factor: prox,
+        delta_h_film_nm: dh,
+        num_points: 7
+      })
+    });
+    const data = await r.json();
+    if (data.error) return;
+    lastFabResult = data;
+    renderFabResult(data);
+    document.getElementById('spec-status').textContent = currentLang === 'zh' ? '工艺误差分析已完成' : 'Fab analysis ready';
+  } catch (_) {}
+}
+
+async function exportFabBiasGdsUI() {
+  const cfg = readConfigFromForm();
+  const prox = parseFloat(document.getElementById('fab-prox').value) || 1.05;
+  const r = await fetch('/api/export_fab_gds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config: cfg, proximity_gap_factor: prox })
+  });
+  const data = await r.json();
+  if (data.error) return;
+  showGdsExportResult(data);
+  setStageView('gds');
+}
+
+function renderFabResult(fab) {
+  if (!fab || !fab.summary) return;
+  const s = fab.summary;
+  const uc = s.under_dose_corner;
+  const oc = s.over_dose_corner;
+  const zh = currentLang === 'zh';
+
+  document.getElementById('fab-mech-banner').innerHTML = zh
+    ? `<strong>${fab.resist_name_zh}</strong><br>• ${fab.overdose_mechanism_zh}<br>• ${fab.underdose_mechanism_zh}`
+    : `<strong>${fab.resist_name_en}</strong><br>• ${fab.overdose_mechanism_en}<br>• ${fab.underdose_mechanism_en}`;
+
+  const drcEl = document.getElementById('fab-drc-banner');
+  if (fab.drc_warnings && fab.drc_warnings.length > 0) {
+    drcEl.style.display = 'block';
+    drcEl.innerHTML = '⚠️ ' + fab.drc_warnings.join('<br>⚠️ ');
+  } else {
+    drcEl.style.display = 'none';
+  }
+
+  document.getElementById('fab-kpi-win').textContent = `${s.cd_window_er15_span_nm.toFixed(1)} nm`;
+  document.getElementById('fab-kpi-win-sub').textContent = fab.resist_tone === 'direct_cd'
+    ? `ER≥10 dB: ${s.cd_window_er10_span_nm.toFixed(1)} nm`
+    : (zh ? `剂量窗口: ${s.dose_window_er15_span_pct.toFixed(1)}%` : `Dose window: ${s.dose_window_er15_span_pct.toFixed(1)}%`);
+
+  document.getElementById('fab-kpi-over').textContent = `${oc.extinction_ratio_dB.toFixed(1)} dB`;
+  document.getElementById('fab-kpi-over-sub').textContent = `ΔCD ${oc.delta_cd_nm >= 0 ? '+' : ''}${oc.delta_cd_nm.toFixed(0)} nm · gap ${(oc.gap_fab_um*1000).toFixed(0)} nm (${oc.coupling_regime})`;
+
+  document.getElementById('fab-kpi-under').textContent = `${uc.extinction_ratio_dB.toFixed(1)} dB`;
+  document.getElementById('fab-kpi-under-sub').textContent = `ΔCD ${uc.delta_cd_nm >= 0 ? '+' : ''}${uc.delta_cd_nm.toFixed(0)} nm · gap ${(uc.gap_fab_um*1000).toFixed(0)} nm (${uc.coupling_regime})`;
+
+  document.getElementById('fab-kpi-slope').textContent = `${s.sensitivity_dl_dcd_pm_per_nm >= 0 ? '+' : ''}${s.sensitivity_dl_dcd_pm_per_nm.toFixed(0)} pm/nm`;
+  document.getElementById('fab-kpi-heater').textContent = s.heater_dt_for_10nm_blueshift_k !== null
+    ? (zh ? `-10nm蓝移热调补偿: +${s.heater_dt_for_10nm_blueshift_k} K` : `-10nm CD heater trim: +${s.heater_dt_for_10nm_blueshift_k} K`)
+    : `dλ/dDose = ${s.sensitivity_dl_ddose_pm_per_pct.toFixed(0)} pm/%`;
+
+  const tbody = document.querySelector('#fab-table tbody');
+  tbody.innerHTML = '';
+  (fab.corners || []).forEach(c => {
+    const tr = document.createElement('tr');
+    if (Math.abs(c.x_value) < 1e-6) tr.style.background = 'rgba(56,189,248,0.09)';
+    const xTxt = fab.resist_tone === 'direct_cd'
+      ? `${c.delta_cd_nm >= 0 ? '+' : ''}${c.delta_cd_nm.toFixed(1)} nm`
+      : `${c.dose_error_pct >= 0 ? '+' : ''}${c.dose_error_pct.toFixed(1)}%`;
+    const flagTxt = (c.drc_flags && c.drc_flags.length > 0) ? ` · <span style="color:#fbbf24;">${c.drc_flags[0]}</span>` : '';
+    tr.innerHTML = `
+      <td><strong>${xTxt}</strong></td>
+      <td>${c.delta_cd_nm >= 0 ? '+' : ''}${c.delta_cd_nm.toFixed(1)}</td>
+      <td>${(c.w_ring_fab_um * 1000).toFixed(1)}</td>
+      <td>${(c.gap_fab_um * 1000).toFixed(1)}</td>
+      <td style="color:${c.extinction_ratio_dB >= 15 ? '#34d399' : (c.extinction_ratio_dB >= 10 ? '#fbbf24' : '#f87171')};font-weight:700;">${c.extinction_ratio_dB.toFixed(1)}</td>
+      <td>${Math.round(c.Q_loaded).toLocaleString()}</td>
+      <td>${c.delta_wl_res_nm >= 0 ? '+' : ''}${c.delta_wl_res_nm.toFixed(3)}</td>
+      <td>${c.coupling_regime}${flagTxt}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  drawFabErCurve(fab);
+  drawFabDipOverlay(fab);
+}
+
+function drawFabErCurve(fab) {
+  const { ctx, w, h } = setupCanvas('cv-fab-er');
+  const pad = { l: 48, r: 52, t: 22, b: 36 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const corners = fab.corners || [];
+  if (corners.length < 2) return;
+
+  const xs = corners.map(c => c.x_value);
+  const ers = corners.map(c => c.extinction_ratio_dB);
+  const dwls = corners.map(c => c.delta_wl_res_nm);
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  const erMax = Math.max(25, Math.ceil(Math.max(...ers) / 5) * 5 + 3);
+  const dwlAbs = Math.max(0.2, Math.max(...dwls.map(Math.abs)) * 1.15);
+
+  const tx = v => pad.l + ((v - xmin) / Math.max(xmax - xmin, 1e-6)) * pw;
+  const tyEr = v => pad.t + ph - (Math.max(0, v) / erMax) * ph;
+  const tyWl = v => pad.t + ph * (0.5 - (v / (2 * dwlAbs)));
+
+  // Shaded ER >= 15 dB yield band
+  const y15 = tyEr(15.0);
+  ctx.fillStyle = 'rgba(52,211,153,0.10)';
+  ctx.fillRect(pad.l, pad.t, pw, Math.max(0, y15 - pad.t));
+  ctx.strokeStyle = 'rgba(52,211,153,0.45)';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(pad.l, y15); ctx.lineTo(pad.l + pw, y15); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axes border
+  ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(pad.l, pad.t, pw, ph);
+
+  // Zero-dose vertical line
+  const x0 = tx(0);
+  ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+  ctx.beginPath(); ctx.moveTo(x0, pad.t); ctx.lineTo(x0, pad.t + ph); ctx.stroke();
+
+  // Resonance wavelength shift Δλ [nm] curve (dashed amber)
+  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2.0; ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  corners.forEach((c, i) => { const x = tx(c.x_value), y = tyWl(c.delta_wl_res_nm); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Extinction Ratio [dB] curve (solid cyan-green)
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  corners.forEach((c, i) => { const x = tx(c.x_value), y = tyEr(c.extinction_ratio_dB); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.stroke();
+
+  corners.forEach(c => {
+    ctx.fillStyle = c.extinction_ratio_dB >= 15 ? '#34d399' : '#f87171';
+    ctx.beginPath(); ctx.arc(tx(c.x_value), tyEr(c.extinction_ratio_dB), 4.0, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Labels
+  ctx.fillStyle = '#94a3b8'; ctx.font = '11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  [xmin, 0, xmax].forEach(v => ctx.fillText((v > 0 ? '+' : '') + v.toFixed(0), tx(v), h - 18));
+  ctx.fillText(currentLang === 'zh' ? fab.x_label_zh : fab.x_label_en, pad.l + pw / 2, h - 4);
+
+  ctx.textAlign = 'right'; ctx.fillStyle = '#38bdf8';
+  [0, 15, erMax].forEach(v => ctx.fillText(v.toFixed(0) + ' dB', pad.l - 5, tyEr(v) + 4));
+
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f59e0b';
+  [-dwlAbs, 0, dwlAbs].forEach(v => ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(1) + 'nm', pad.l + pw + 5, tyWl(v) + 4));
+}
+
+function drawFabDipOverlay(fab) {
+  const { ctx, w, h } = setupCanvas('cv-fab-dips');
+  const pad = { l: 46, r: 16, t: 24, b: 36 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const cs = fab.corner_spectra || {};
+  const trMin = cs.min_corner, trNom = cs.nominal, trMax = cs.max_corner;
+  if (!trNom) return;
+
+  const det = trNom.detuning_pm;
+  const xmin = det[0], xmax = det[det.length - 1];
+  const allDb = [...(trMin ? trMin.thru_dB : []), ...trNom.thru_dB, ...(trMax ? trMax.thru_dB : [])];
+  const ymin = Math.min(-28, Math.floor(Math.min(...allDb) / 5) * 5 - 2);
+  const ymax = 1.5;
+
+  const tx = v => pad.l + ((v - xmin) / Math.max(xmax - xmin, 1e-6)) * pw;
+  const ty = v => pad.t + ph - ((Math.max(ymin, Math.min(ymax, v)) - ymin) / (ymax - ymin)) * ph;
+
+  ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(pad.l, pad.t, pw, ph);
+
+  const series = [
+    { data: trMin, col: '#f472b6', lbl: currentLang === 'zh' ? '欠曝光 (-Max)' : 'Under-Dose (-Max)' },
+    { data: trNom, col: '#38bdf8', lbl: currentLang === 'zh' ? '标称剂量 (0%)' : 'Nominal (0%)' },
+    { data: trMax, col: '#fbbf24', lbl: currentLang === 'zh' ? '过曝光 (+Max)' : 'Over-Dose (+Max)' }
+  ];
+  series.forEach((s, idx) => {
+    if (!s.data) return;
+    ctx.strokeStyle = s.col; ctx.lineWidth = idx === 1 ? 2.4 : 1.8;
+    ctx.beginPath();
+    s.data.detuning_pm.forEach((x, i) => {
+      const px = tx(x), py = ty(s.data.thru_dB[i]);
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+    ctx.fillStyle = s.col; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(`● ${s.lbl} (${s.data.dip_wavelength_nm.toFixed(2)} nm)`, pad.l + 8, pad.t + 15 + idx * 14);
+  });
+
+  ctx.fillStyle = '#94a3b8'; ctx.textAlign = 'center';
+  [xmin, 0, xmax].forEach(v => ctx.fillText(v.toFixed(0) + ' pm', tx(v), h - 18));
+  ctx.fillText(currentLang === 'zh' ? '相对各谐振峰中心失谐 Δλ [pm]' : 'Detuning Around Each Corner Dip Δλ [pm]', pad.l + pw / 2, h - 4);
+  ctx.textAlign = 'right';
+  [0, -15, ymin].forEach(v => ctx.fillText(v.toFixed(0) + ' dB', pad.l - 5, ty(v) + 4));
 }
 
 // ==================== BOOTSTRAP ====================
