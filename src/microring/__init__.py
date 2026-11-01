@@ -1,7 +1,7 @@
-"""OpenMRR Studio (`openmrr`) — License-Free Photonics Eigenmode, CMT & GDSII Suite."""
+"""MicroRing Studio (`microring`) - License-Free Photonic IC, Coupler, Eigenmode, CMT & GDSII Suite."""
 from __future__ import annotations
 
-__version__ = "3.4.0"
+__version__ = "3.5.0"
 
 from .active_tuning import (
     HEATER_METAL_CATALOG,
@@ -17,7 +17,9 @@ from .agent_tools import (
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
+    agent_high_q_fdtd,
     agent_inspect_gds,
+    agent_io_coupler,
     agent_status,
     agent_sweep_mrr,
     agent_width_cutoff,
@@ -42,12 +44,19 @@ from .fab_tolerance import (
     run_fabrication_error_analysis,
 )
 from .gds_bridge import (
-    OPENMRR_LAYERS,
+    MICRORING_LAYERS,
     analyze_uploaded_gds,
     export_sweep_array_gds,
     write_klayout_layer_props,
 )
 from .hardware_accel import detect_hardware_profile, run_compute_benchmark
+from .io_couplers import (
+    FIBER_LASER_CATALOG,
+    design_butt_edge_coupler,
+    design_grating_coupler,
+    export_io_coupler_gds,
+    export_io_coupler_interconnect,
+)
 from .materials import (
     MATERIAL_CATALOG,
     T_REF_K,
@@ -67,6 +76,9 @@ from .mrr_cmt_fit_predict import (
 from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
+    analyze_high_q_fdtd_convergence,
+    build_mrr_gds_library,
+    export_coupler_cutout_gds,
     export_mrr_gds,
     simulate_mrr_topology,
 )
@@ -74,9 +86,10 @@ from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 
 __all__ = [
     "__version__",
+    "FIBER_LASER_CATALOG",
     "HEATER_METAL_CATALOG",
     "MATERIAL_CATALOG",
-    "OPENMRR_LAYERS",
+    "MICRORING_LAYERS",
     "RESIST_TONE_CATALOG",
     "TOPOLOGY_CATALOG",
     "TUNING_MECHANISM_CATALOG",
@@ -90,17 +103,26 @@ __all__ = [
     "agent_design_mrr",
     "agent_fab_tolerance",
     "agent_fit_spectrum",
+    "agent_high_q_fdtd",
     "agent_inspect_gds",
+    "agent_io_coupler",
     "agent_status",
     "agent_sweep_mrr",
     "agent_width_cutoff",
+    "analyze_high_q_fdtd_convergence",
     "analyze_uploaded_gds",
     "build_conformal_waveguide_mesh",
+    "build_mrr_gds_library",
     "check_wavelength_compatibility",
     "create_initial_session",
+    "design_butt_edge_coupler",
+    "design_grating_coupler",
     "detect_hardware_profile",
     "evaluate_material_dispersion_table",
+    "export_coupler_cutout_gds",
     "export_fab_bias_array_gds",
+    "export_io_coupler_gds",
+    "export_io_coupler_interconnect",
     "export_lumerical_interconnect_bundle",
     "export_mrr_gds",
     "export_sweep_array_gds",

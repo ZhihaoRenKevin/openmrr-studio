@@ -1,4 +1,4 @@
-"""Automated Waveguide Dispersion & MRR Parameter Sweep Engine (`openmrr.sweeps`).
+"""Automated Waveguide Dispersion & MRR Parameter Sweep Engine (`microring.sweeps`).
 
 Provides two high-level design sweeps used by both Python cookbook scripts and
 the Conversational Photonics Copilot UI:

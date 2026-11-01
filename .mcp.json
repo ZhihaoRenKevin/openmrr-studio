@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "openmrr": {
+    "microring": {
       "command": "uv",
-      "args": ["run", "openmrr", "mcp"]
+      "args": ["run", "microring", "mcp"]
     }
   }
 }

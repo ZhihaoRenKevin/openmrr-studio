@@ -1,4 +1,4 @@
-"""Native Desktop & Browser Application Launcher for `OpenMRR Studio`.
+"""Native Desktop & Browser Application Launcher for `MicroRing Studio`.
 
 Starts the local `127.0.0.1` Starlette/Uvicorn server in a background daemon thread
 and opens either:
@@ -33,8 +33,8 @@ if not getattr(sys, "frozen", False):
         sys.path.insert(0, _src_dir)
 
 try:
-    from openmrr import __version__ as APP_VERSION
-    from openmrr.app_server import app
+    from microring import __version__ as APP_VERSION
+    from microring.app_server import app
 except ImportError:
     from . import __version__ as APP_VERSION
     from .app_server import app
@@ -108,12 +108,12 @@ def launch_studio(
     thread.start()
 
     if not _wait_until_ready(url):
-        print(f"[OpenMRR] ERROR: Local backend at {url} failed to start within 15 s.")
+        print(f"[MicroRing] ERROR: Local backend at {url} failed to start within 15 s.")
         return 1
 
     if headless_check:
         _run_headless_physics_check(url)
-        print(f"[OpenMRR] Headless server + 2D FEM check PASSED on {url}")
+        print(f"[MicroRing] Headless server + 2D FEM check PASSED on {url}")
         server.should_exit = True
         thread.join(timeout=3.0)
         return 0
@@ -123,7 +123,7 @@ def launch_studio(
             import webview  # type: ignore
 
             webview.create_window(
-                f"OpenMRR Studio v{APP_VERSION} - License-Free Photonics Microring Designer",
+                f"MicroRing Studio v{APP_VERSION} - License-Free Photonics Microring Designer",
                 url,
                 width=1460,
                 height=900,
@@ -133,9 +133,9 @@ def launch_studio(
             server.should_exit = True
             return 0
         except Exception as exc:
-            print(f"[OpenMRR] Native webview unavailable ({exc}); opening system browser at {url}")
+            print(f"[MicroRing] Native webview unavailable ({exc}); opening system browser at {url}")
 
-    print(f"[OpenMRR] Running at {url} — Press Ctrl+C to stop.", flush=True)
+    print(f"[MicroRing] Running at {url} — Press Ctrl+C to stop.", flush=True)
     if not no_open:
         webbrowser.open(url)
     try:
@@ -148,7 +148,7 @@ def launch_studio(
 
 def main() -> None:
     multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser(description=f"Launch OpenMRR Studio v{APP_VERSION}")
+    parser = argparse.ArgumentParser(description=f"Launch MicroRing Studio v{APP_VERSION}")
     parser.add_argument("--browser", action="store_true", help="Open in default web browser instead of native window")
     parser.add_argument("--no-open", action="store_true", help="Serve HTTP UI without opening a new browser window")
     parser.add_argument("--headless-check", action="store_true", help="Verify local server + 2D FEM startup and exit")

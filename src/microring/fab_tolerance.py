@@ -1,4 +1,4 @@
-"""Cleanroom Lithography Dose, Photoresist Tone & Etch Bias Tolerance Engine (`openmrr.fab_tolerance`).
+"""Cleanroom Lithography Dose, Photoresist Tone & Etch Bias Tolerance Engine (`microring.fab_tolerance`).
 
 Models realistic cleanroom and foundry fabrication errors on integrated photonic microring
 resonators across **E-Beam Lithography (EBL)** and **DUV Photolithography (`248 nm` KrF / `193 nm` ArF)**:
@@ -461,7 +461,7 @@ def export_fab_bias_array_gds(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     lib = gdstk.Library(unit=1e-6, precision=1e-9)
-    top = lib.new_cell("OpenMRR_Fab_CD_Bias_Array")
+    top = lib.new_cell("MicroRing_Fab_CD_Bias_Array")
 
     default_span = 2.6 * base_cfg.ring_radius_um + base_cfg.straight_length_um + 60.0
     dx_pitch = float(pitch_x_um) if pitch_x_um is not None else max(default_span, 145.0)

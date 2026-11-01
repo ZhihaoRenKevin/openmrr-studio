@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Optional GitHub Release tag to attach built installers to (e.g. v3.4.0)"
+        description: "Optional GitHub Release tag to attach built installers to (e.g. v3.5.0)"
         required: false
         default: ""
       skip_macos:
@@ -33,21 +33,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install OpenMRR Studio & PyInstaller
+      - name: Install MicroRing Studio & PyInstaller
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[desktop]" pillow pyinstaller
 
-      - name: Run 11-Suite Verification Tests
-        run: python tests/test_openmrr_all.py
+      - name: Run 12-Suite Verification Tests
+        run: python tests/test_microring_all.py
 
       - name: Build & Smoke-Test macOS .app + .dmg
-        run: python -m openmrr.build_standalone --target macos
+        run: python -m microring.build_standalone --target macos
 
       - name: Upload macOS .dmg Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenMRR-Studio-macOS-DMG
+          name: MicroRing-Studio-macOS-DMG
           path: dist/*.dmg
 
       - name: Attach .dmg to GitHub Release
@@ -69,24 +69,24 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install OpenMRR Studio & PyInstaller
+      - name: Install MicroRing Studio & PyInstaller
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[desktop]" pillow pyinstaller
 
-      - name: Run 11-Suite Verification Tests
+      - name: Run 12-Suite Verification Tests
         shell: pwsh
-        run: python tests/test_openmrr_all.py
+        run: python tests/test_microring_all.py
 
       - name: Build & Smoke-Test Windows Setup .exe + Portable .zip
         shell: pwsh
-        run: python -m openmrr.build_standalone --target windows-cpu
+        run: python -m microring.build_standalone --target windows-cpu
 
       - name: Upload Windows .exe & .zip Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenMRR-Studio-Windows-Installer
+          name: MicroRing-Studio-Windows-Installer
           path: |
             dist/*Setup*.exe
             dist/*Portable*.zip

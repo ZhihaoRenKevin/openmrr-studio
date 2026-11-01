@@ -1,10 +1,10 @@
-"""Generate Publication-Grade Hero Overview Figure (`1x4` Panels) for OpenMRR Studio.
+"""Generate Publication-Grade Hero Overview Figure (`1x4` Panels) for MicroRing Studio.
 
 Follows Nature Photonics figure standards:
   - Font: Arial (panel tags `a–d` bold 9 pt, axis labels 8 pt, tick labels 7.5 pt)
   - Axes: 4-sided closed frame, inward ticks (`direction='in'`), zero background gridlines
   - Colormap: `inferno` for optical field magnitude |E|; colorblind-safe Okabe-Ito curves
-  - Outputs: `docs/images/hero_openmrr_overview.png` (600 DPI) + `.svg` + per-panel CSVs
+  - Outputs: `docs/images/hero_microring_overview.png` (600 DPI) + `.svg` + per-panel CSVs
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import (
+from microring import (
     MRRDesignConfig,
     WaveguideCrossSectionSpec,
     fit_single_resonance_cmt,
@@ -30,7 +30,7 @@ from openmrr import (
     simulate_mrr_topology,
     solve_modes_fem,
 )
-from openmrr.mrr_cmt_fit_predict import cmt_split_doublet_power
+from microring.mrr_cmt_fit_predict import cmt_split_doublet_power
 
 
 def apply_nature_style() -> None:
@@ -260,8 +260,8 @@ def main() -> None:
             fontsize=9.0, fontweight="bold", va="bottom", ha="left",
         )
 
-    out_png = img_dir / "hero_openmrr_overview.png"
-    out_svg = img_dir / "hero_openmrr_overview.svg"
+    out_png = img_dir / "hero_microring_overview.png"
+    out_svg = img_dir / "hero_microring_overview.svg"
     fig.savefig(out_png, dpi=600)
     fig.savefig(out_svg)
     plt.close(fig)

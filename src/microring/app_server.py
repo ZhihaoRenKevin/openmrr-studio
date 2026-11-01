@@ -1,4 +1,4 @@
-"""Local Starlette ASGI Backend for `OpenMRR Studio v3.0` (`127.0.0.1` Only).
+"""Local Starlette ASGI Backend for `MicroRing Studio v3.0` (`127.0.0.1` Only).
 
 Serves the offline native desktop / browser UI and exposes clean JSON endpoints for:
   - Conversational Photonics Design Copilot (`/api/chat_init`, `/api/chat`)
@@ -56,6 +56,13 @@ from .gds_bridge import (
     write_klayout_layer_props,
 )
 from .hardware_accel import detect_hardware_profile, run_compute_benchmark
+from .io_couplers import (
+    FIBER_LASER_CATALOG,
+    design_butt_edge_coupler,
+    design_grating_coupler,
+    export_io_coupler_gds,
+    export_io_coupler_interconnect,
+)
 from .materials import (
     MATERIAL_CATALOG,
     T_REF_K,
@@ -74,6 +81,8 @@ from .mrr_cmt_fit_predict import (
 from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
+    analyze_high_q_fdtd_convergence,
+    export_coupler_cutout_gds,
     export_mrr_gds,
     get_default_output_root,
     simulate_mrr_topology,
@@ -391,7 +400,7 @@ async def api_sweep_mrr(request: Request) -> JSONResponse:
 def _export_single_gds_sync(payload: dict) -> dict:
     cfg = _dict_to_mrr_config(payload)
     GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    fname = f"OpenMRR_{cfg.topology}_{cfg.core_material}_R{int(cfg.ring_radius_um)}um.gds"
+    fname = f"MicroRing_{cfg.topology}_{cfg.core_material}_R{int(cfg.ring_radius_um)}um.gds"
     out_path = GDS_EXPORT_DIR / fname
     saved = export_mrr_gds(cfg, out_path)
     lyp_saved = write_klayout_layer_props(out_path.with_suffix(".lyp"))
@@ -425,7 +434,7 @@ def _export_sweep_gds_sync(payload: dict) -> dict:
         npts = int(payload.get("num_devices", 5))
         vals = [round(float(x), 4) for x in np.linspace(vmin, vmax, max(2, npts))]
     GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    fname = f"OpenMRR_SweepArray_{cfg.core_material}_{param_name}_{len(vals)}x.gds"
+    fname = f"MicroRing_SweepArray_{cfg.core_material}_{param_name}_{len(vals)}x.gds"
     out_path = GDS_EXPORT_DIR / fname
     saved = export_sweep_array_gds(cfg, param_name, vals, out_path)
     lyp_saved = str(Path(saved).with_suffix(".lyp"))
@@ -480,7 +489,7 @@ def _export_fab_gds_sync(payload: dict) -> dict:
     biases = payload.get("cd_prebias_list_nm")
     bias_list = [float(b) for b in biases] if biases else [-20.0, -10.0, 0.0, 10.0, 20.0]
     GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    fname = f"OpenMRR_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
+    fname = f"MicroRing_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
     out_path = GDS_EXPORT_DIR / fname
     info = export_fab_bias_array_gds(
         cfg,
@@ -574,6 +583,162 @@ async def api_export_interconnect(request: Request) -> JSONResponse:
     try:
         payload = await request.json()
         res = await anyio.to_thread.run_sync(_export_interconnect_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _io_coupler_sync(payload: dict) -> dict:
+    ctype = str(payload.get("coupler_type", "grating_coupler")).lower()
+    mat = str(payload.get("core_material", "Si"))
+    wl = float(payload.get("wavelength_nm", 1550.0))
+    pol = str(payload.get("polarization", "TE0"))
+    h_um = float(payload.get("film_height_um", 0.22))
+    wb = float(payload.get("w_bus_um", 0.48))
+    box_um = float(payload.get("box_thickness_um", 2.0))
+    fib = str(payload.get("fiber_preset", "Lensed_2p5um" if "butt" in ctype else "SMF28_1550"))
+
+    if "butt" in ctype or "edge" in ctype:
+        wt_raw = payload.get("w_tip_um")
+        wt_val = float(wt_raw) if wt_raw not in (None, "", "auto", 0, "0") else None
+        res = design_butt_edge_coupler(
+            core_material=mat,
+            clad_material=str(payload.get("clad_material", "SiO2")),
+            top_clad_material=str(payload.get("top_clad_material", "SiO2")),
+            wavelength_nm=wl,
+            polarization=pol,
+            film_height_um=h_um,
+            slab_height_um=float(payload.get("slab_height_um", 0.0)),
+            sidewall_deg=float(payload.get("sidewall_deg", 88.0)),
+            w_bus_um=wb,
+            w_tip_um=wt_val,
+            taper_length_um=float(payload.get("taper_length_um", 180.0)),
+            taper_profile=str(payload.get("taper_profile", "adiabatic")),
+            fiber_preset=fib,
+            mfd_x_um=float(payload["mfd_x_um"]) if payload.get("mfd_x_um") not in (None, "") else None,
+            mfd_y_um=float(payload["mfd_y_um"]) if payload.get("mfd_y_um") not in (None, "") else None,
+            ar_coating=bool(payload.get("ar_coating", True)),
+            box_thickness_um=box_um,
+            min_feature_nm=float(payload.get("min_feature_nm", 100.0)),
+        )
+    else:
+        etch_raw = payload.get("etch_depth_um")
+        etch_val = float(etch_raw) if etch_raw not in (None, "", "auto", 0, "0") else None
+        pitch_raw = payload.get("pitch_um")
+        pitch_val = float(pitch_raw) if pitch_raw not in (None, "", "auto", 0, "0") else None
+        res = design_grating_coupler(
+            core_material=mat,
+            clad_material=str(payload.get("clad_material", "SiO2")),
+            top_clad_material=str(payload.get("top_clad_material", "SiO2")),
+            wavelength_nm=wl,
+            polarization=pol,
+            film_height_um=h_um,
+            etch_depth_um=etch_val,
+            fiber_angle_deg=float(payload.get("fiber_angle_deg", 10.0)),
+            apodized=bool(payload.get("apodized", True)),
+            focusing=bool(payload.get("focusing", True)),
+            pitch_um=pitch_val,
+            fill_factor=float(payload.get("fill_factor", 0.50)),
+            num_periods=int(payload.get("num_periods", 26)),
+            grating_width_um=float(payload.get("grating_width_um", 12.0)),
+            w_bus_um=wb,
+            box_thickness_um=box_um,
+            top_clad_thickness_um=float(payload.get("top_clad_thickness_um", 1.5)),
+            fiber_preset=fib,
+            min_feature_nm=float(payload.get("min_feature_nm", 80.0)),
+        )
+    res["fiber_catalog"] = FIBER_LASER_CATALOG
+    return res
+
+
+async def api_io_coupler(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_io_coupler_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _export_io_gds_sync(payload: dict) -> dict:
+    coupler = payload.get("coupler_result")
+    if not isinstance(coupler, dict) or "coupler_type" not in coupler:
+        coupler = _io_coupler_sync(payload)
+    GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    loopback = bool(payload.get("include_ring_loopback", False))
+    ring_cfg = _dict_to_mrr_config(payload["ring_config"]) if isinstance(payload.get("ring_config"), dict) else None
+    safe_mat = str(coupler["core_material"]).replace("-", "")
+    loop_tag = "_RingTestLoop" if loopback else ""
+    out_file = GDS_EXPORT_DIR / f"MicroRing_{coupler['coupler_type']}_{safe_mat}{loop_tag}.gds"
+    info = export_io_coupler_gds(
+        coupler,
+        out_file,
+        include_ring_loopback=loopback,
+        ring_config=ring_cfg,
+        fa_pitch_um=float(payload.get("fa_pitch_um", 127.0)),
+    )
+    saved = Path(info["gds_path"])
+    lyp_saved = Path(info["lyp_path"])
+    info["saved_path"] = str(saved)
+    info["gds_download_url"] = f"/api/download_file?name={saved.name}"
+    info["lyp_download_url"] = f"/api/download_file?name={lyp_saved.name}"
+    info["gds_view"] = analyze_uploaded_gds(str(saved))
+    return info
+
+
+async def api_export_io_gds(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_export_io_gds_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _export_io_interconnect_sync(payload: dict) -> dict:
+    coupler = payload.get("coupler_result")
+    if not isinstance(coupler, dict) or "coupler_type" not in coupler:
+        coupler = _io_coupler_sync(payload)
+    GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_mat = str(coupler["core_material"]).replace("-", "")
+    sub_dir = GDS_EXPORT_DIR / f"io_interconnect_{coupler['coupler_type']}_{safe_mat}"
+    ic = export_io_coupler_interconnect(coupler, sub_dir)
+    # Copy zip to GDS_EXPORT_DIR root if not already there
+    zp = Path(ic["zip_path"])
+    ic["zip_download_url"] = f"/api/download_file?name={zp.name}"
+    return ic
+
+
+async def api_export_io_interconnect(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_export_io_interconnect_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _high_q_fdtd_sync(payload: dict) -> dict:
+    cfg = _dict_to_mrr_config(payload.get("config", payload))
+    sim_times = _parse_bias_payload(payload.get("sim_times_ps"))
+    hq = analyze_high_q_fdtd_convergence(cfg, sim_times_ps=sim_times)
+    if payload.get("export_cutout"):
+        GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        cut = export_coupler_cutout_gds(cfg, GDS_EXPORT_DIR)
+        hq["cutout"] = {
+            "saved_path": cut["gds_path"],
+            "gds_download_url": f"/api/download_file?name={Path(cut['gds_path']).name}",
+            "lsf_download_url": f"/api/download_file?name={Path(cut['lsf_path']).name}",
+            "gds_view": analyze_uploaded_gds(str(cut["gds_path"])),
+            **cut,
+        }
+    return hq
+
+
+async def api_high_q_fdtd(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_high_q_fdtd_sync, payload)
         return JSONResponse(res)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -715,6 +880,10 @@ def create_app() -> Starlette:
         Route("/api/export_fab_gds", api_export_fab_gds, methods=["POST"]),
         Route("/api/active_tuning", api_active_tuning, methods=["POST"]),
         Route("/api/export_interconnect", api_export_interconnect, methods=["POST"]),
+        Route("/api/io_coupler", api_io_coupler, methods=["POST"]),
+        Route("/api/export_io_gds", api_export_io_gds, methods=["POST"]),
+        Route("/api/export_io_interconnect", api_export_io_interconnect, methods=["POST"]),
+        Route("/api/high_q_fdtd", api_high_q_fdtd, methods=["POST"]),
         Route("/api/download_file", api_download_file, methods=["GET"]),
         Route("/api/demo_spectrum", api_demo_spectrum, methods=["GET"]),
         Route("/api/fit_spectrum", api_fit_spectrum, methods=["POST"]),

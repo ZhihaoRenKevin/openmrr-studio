@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Double-clickable macOS Launcher for OpenMRR Studio
+# Double-clickable macOS Launcher for MicroRing Studio
 # Automatically sets up a local .venv on first launch if needed.
 set -e
 
@@ -8,13 +8,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 export PYTHONPATH="$REPO_ROOT/src:${PYTHONPATH}"
 
-if [ -n "${OPENMRR_PYTHON:-}" ] && [ -x "${OPENMRR_PYTHON}" ]; then
-  exec "${OPENMRR_PYTHON}" -u -m openmrr.desktop_app "$@"
+if [ -n "${MICRORING_PYTHON:-}" ] && [ -x "${MICRORING_PYTHON}" ]; then
+  exec "${MICRORING_PYTHON}" -u -m microring.desktop_app "$@"
 fi
 
 if [ ! -x "$REPO_ROOT/.venv/bin/python" ]; then
   if command -v uv >/dev/null 2>&1; then
-    echo "[OpenMRR Studio] First-time setup via uv (~30s)..."
+    echo "[MicroRing Studio] First-time setup via uv (~30s)..."
     uv sync --extra desktop || uv sync
   else
     SYS_PY=""
@@ -27,16 +27,16 @@ if [ ! -x "$REPO_ROOT/.venv/bin/python" ]; then
       fi
     done
     if [ -z "$SYS_PY" ]; then
-      echo "[OpenMRR Studio] Python 3.11 or newer was not found."
+      echo "[MicroRing Studio] Python 3.11 or newer was not found."
       echo "Please install Python 3.12 from https://www.python.org/downloads/macos/ and run this launcher again."
       read -r "?Press Enter to close..."
       exit 1
     fi
-    echo "[OpenMRR Studio] First-time setup: creating .venv and installing packages (~1 minute)..."
+    echo "[MicroRing Studio] First-time setup: creating .venv and installing packages (~1 minute)..."
     "$SYS_PY" -m venv "$REPO_ROOT/.venv"
     "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip
     "$REPO_ROOT/.venv/bin/pip" install -e ".[desktop]" || "$REPO_ROOT/.venv/bin/pip" install -e "."
   fi
 fi
 
-exec "$REPO_ROOT/.venv/bin/python" -u -m openmrr.desktop_app "$@"
+exec "$REPO_ROOT/.venv/bin/python" -u -m microring.desktop_app "$@"

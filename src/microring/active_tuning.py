@@ -1,4 +1,4 @@
-"""First-Principles 2D-FEM Active Tuning & Lumerical INTERCONNECT Compact Model Engine (`openmrr.active_tuning`).
+"""First-Principles 2D-FEM Active Tuning & Lumerical INTERCONNECT Compact Model Engine (`microring.active_tuning`).
 
 100% self-contained pure-Python multiphysics solver (`scikit-fem` + `scipy` + `numpy`,
 requiring ZERO COMSOL or commercial TCAD/FDTD licenses) linking material thermo-optic
@@ -1587,17 +1587,17 @@ def export_lumerical_interconnect_bundle(
     """Export 2D-FEM passive S-parameters + active `n_eff` table + `.lsf` circuit for Lumerical INTERCONNECT.
 
     Generates:
-      1. `openmrr_passive_sparams.dat` : Exact INTERCONNECT `Optical N-Port S-Parameter` (`SPAR`)
+      1. `microring_passive_sparams.dat` : Exact INTERCONNECT `Optical N-Port S-Parameter` (`SPAR`)
                                          file with strictly ascending frequency `[Hz]`, `(abs_S, unwrap_phase_rad)`,
                                          reciprocal port symmetry, and verified passivity (`sum |S|^2 <= 1`).
-      2. `openmrr_active_neff_table.txt`: Exact INTERCONNECT `Optical Modulator Measured` (`OMM`)
+      2. `microring_active_neff_table.txt`: Exact INTERCONNECT `Optical Modulator Measured` (`OMM`)
                                          table `(bias_SI, Re(delta_neff), Im(neff_active))` sorted in
                                          strictly ascending bias order with non-negative `Im(neff) >= 0`.
-      3. `build_openmrr_interconnect.lsf`: Turnkey INTERCONNECT circuit builder placing `Waveguide Coupler`,
+      3. `build_microring_interconnect.lsf`: Turnkey INTERCONNECT circuit builder placing `Waveguide Coupler`,
                                          passive `Straight Waveguide`, active `Optical Modulator Measured`,
                                          `DC Source`, `SPAR` comparator, and `Optical Network Analyzer`.
       4. `run_interconnect_lumapi.py`  : Automated Python `lumapi.INTERCONNECT()` multi-bias runner.
-      5. `openmrr_active_neff_loss.csv` & `openmrr_multibias_spectra.csv`: Unit-labeled reference CSVs.
+      5. `microring_active_neff_loss.csv` & `microring_multibias_spectra.csv`: Unit-labeled reference CSVs.
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1664,7 +1664,7 @@ def export_lumerical_interconnect_bundle(
     abs_s31 = np.abs(s31)
     ang_s31 = np.unwrap(np.angle(s31))
 
-    spar_path = out_dir / "openmrr_passive_sparams.dat"
+    spar_path = out_dir / "microring_passive_sparams.dat"
     spar_lines: list[str] = []
 
     def _append_spar_block(dst_p: int, src_p: int, mag_v: np.ndarray, ph_v: np.ndarray) -> None:
@@ -1692,7 +1692,7 @@ def export_lumerical_interconnect_bundle(
 
     sorted_states = sorted(states, key=lambda r: float(r["bias_value"]))
     # Ensure strictly ascending unique bias entries for INTERCONNECT table parser
-    omm_path = out_dir / "openmrr_active_neff_table.txt"
+    omm_path = out_dir / "microring_active_neff_table.txt"
     omm_lines: list[str] = []
     seen_b: list[float] = []
     for st in sorted_states:
@@ -1708,7 +1708,7 @@ def export_lumerical_interconnect_bundle(
     omm_path.write_text("\n".join(omm_lines) + "\n", encoding="utf-8")
 
     # 3. Write unit-labeled summary CSV & multi-bias spectra CSV
-    neff_csv_path = out_dir / "openmrr_active_neff_loss.csv"
+    neff_csv_path = out_dir / "microring_active_neff_loss.csv"
     csv_hdr = (
         f"bias_{eff['drive_unit']},bias_SI_{bias_si_unit},heater_power_mW,core_temp_rise_K,"
         "core_E_field_V_per_um,neff_active_real,delta_neff_active_real,alpha_active_dB_per_cm,"
@@ -1724,7 +1724,7 @@ def export_lumerical_interconnect_bundle(
         )
     neff_csv_path.write_text("\n".join(csv_rows) + "\n", encoding="utf-8")
 
-    spec_csv_path = out_dir / "openmrr_multibias_spectra.csv"
+    spec_csv_path = out_dir / "microring_multibias_spectra.csv"
     curves = tuning_result["spectra"]["curves"]
     freq_thz = (C0_M_PER_S / (wl_nm_arr * 1e-9)) * 1e-12
     col_names = ["wavelength_nm", "frequency_THz"]
@@ -1745,10 +1745,10 @@ def export_lumerical_interconnect_bundle(
     alpha_pas_db_m = alpha_pas_db_cm * 100.0
     default_bias_si = float(sorted_states[-1]["bias_value"]) * bias_si_scale
 
-    lsf_path = out_dir / "build_openmrr_interconnect.lsf"
+    lsf_path = out_dir / "build_microring_interconnect.lsf"
     lsf_code = f"""# ==============================================================================
-# OpenMRR Studio v3.4.0 -> Ansys Lumerical INTERCONNECT Turnkey Circuit Script
-# Solver Source : OpenMRR 2D Conformal Vector FEM + Spatial CMT (Zero COMSOL)
+# MicroRing Studio v3.4.0 -> Ansys Lumerical INTERCONNECT Turnkey Circuit Script
+# Solver Source : MicroRing 2D Conformal Vector FEM + Spatial CMT (Zero COMSOL)
 # Core Material : {base_cfg.core_material} ({base_cfg.polarization}) | Mechanism: {eff['mechanism']}
 # ==============================================================================
 switchtolayout;
@@ -1767,8 +1767,8 @@ kp_thru        = {kp_thru:.6f};              # Spatial-CMT Through power couplin
 kp_drop        = {kp_drop:.6f};              # Spatial-CMT Drop power coupling kappa^2 [-]
 bias_init_SI   = {default_bias_si:.6e};      # Initial DC bias [{bias_si_unit}]
 
-spar_file      = pwd + "/openmrr_passive_sparams.dat";
-neff_tbl_file  = pwd + "/openmrr_active_neff_table.txt";
+spar_file      = pwd + "/microring_passive_sparams.dat";
+neff_tbl_file  = pwd + "/microring_active_neff_table.txt";
 
 # --- 2. Place Passive N-Port S-Parameter Reference Element (0-Bias Verification) ---
 addelement("Optical N-Port S-Parameter");
@@ -1852,7 +1852,7 @@ connect("WG_ring_passive", "port 2", "C_thru", "port 3");
 connect("SPAR_0Bias_Ref", "port 2", "ONA_1", "input 2");
 """
     lsf_code += """
-?"OpenMRR INTERCONNECT circuit built successfully. Running ONA simulation...";
+?"MicroRing INTERCONNECT circuit built successfully. Running ONA simulation...";
 run;
 """
     lsf_path.write_text(lsf_code, encoding="utf-8")
@@ -1860,11 +1860,11 @@ run;
     # 5. Write automated Python `lumapi.INTERCONNECT()` multi-bias sweep runner
     py_path = out_dir / "run_interconnect_lumapi.py"
     bias_si_list = [round(float(st["bias_value"]) * bias_si_scale, 8) for st in sorted_states]
-    py_code = f'''"""Automated Lumerical INTERCONNECT Multi-Bias Runner for OpenMRR Compact Model.
+    py_code = f'''"""Automated Lumerical INTERCONNECT Multi-Bias Runner for MicroRing Compact Model.
 
 Requires Ansys Lumerical INTERCONNECT (`lumapi`) on the workstation running INTERCONNECT.
 All 2D-FEM effective-index perturbations and passive S-parameters in this folder were
-pre-computed license-free by OpenMRR Studio v3.4.0.
+pre-computed license-free by MicroRing Studio v3.4.0.
 """
 from pathlib import Path
 import numpy as np
@@ -1878,7 +1878,7 @@ def run_in_interconnect() -> None:
 
     with lumapi.INTERCONNECT(hide=False) as ic:
         ic.cd(str(BUNDLE_DIR))
-        ic.feval("build_openmrr_interconnect.lsf")
+        ic.feval("build_microring_interconnect.lsf")
 
         traces = []
         wl_nm = None
@@ -1910,10 +1910,10 @@ if __name__ == "__main__":
     exported_files = [spar_path, omm_path, lsf_path, py_path, neff_csv_path, spec_csv_path]
     if make_zip:
         safe_mat = str(base_cfg.core_material).replace("-", "")
-        zip_path = out_dir.parent / f"OpenMRR_INTERCONNECT_{safe_mat}_{eff['mechanism']}.zip"
+        zip_path = out_dir.parent / f"MicroRing_INTERCONNECT_{safe_mat}_{eff['mechanism']}.zip"
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for fp in exported_files:
-                zf.write(fp, arcname=f"openmrr_interconnect_{safe_mat}/{fp.name}")
+                zf.write(fp, arcname=f"microring_interconnect_{safe_mat}/{fp.name}")
 
     return {
         "bundle_dir": str(out_dir),

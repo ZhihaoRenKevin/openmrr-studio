@@ -1,7 +1,7 @@
-"""Comprehensive Automated Test Suite for OpenMRR Studio v3.0.
+"""Comprehensive Automated Test Suite for MicroRing Studio v3.5.0.
 
 Can be executed either with `pytest` (`uv run pytest`) or directly as a standalone
-verification script (`python tests/test_openmrr_all.py`).
+verification script (`python tests/test_microring_all.py`).
 """
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import (
+from microring import (
+    FIBER_LASER_CATALOG,
     MATERIAL_CATALOG,
     MRRDesignConfig,
     RESIST_TONE_CATALOG,
@@ -30,13 +31,21 @@ from openmrr import (
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
+    agent_high_q_fdtd,
     agent_inspect_gds,
+    agent_io_coupler,
     agent_status,
     agent_sweep_mrr,
+    analyze_high_q_fdtd_convergence,
     analyze_uploaded_gds,
     create_initial_session,
+    design_butt_edge_coupler,
+    design_grating_coupler,
     detect_hardware_profile,
+    export_coupler_cutout_gds,
     export_fab_bias_array_gds,
+    export_io_coupler_gds,
+    export_io_coupler_interconnect,
     export_lumerical_interconnect_bundle,
     export_mrr_gds,
     export_sweep_array_gds,
@@ -53,9 +62,9 @@ from openmrr import (
     simulate_mrr_topology,
     solve_modes_fem,
 )
-import openmrr.app_server as srv
-from openmrr.mcp_server import handle_mcp_request
-from openmrr.mrr_cmt_fit_predict import cmt_split_doublet_power
+import microring.app_server as srv
+from microring.mcp_server import handle_mcp_request
+from microring.mrr_cmt_fit_predict import cmt_split_doublet_power
 
 
 async def _asgi_request(
@@ -64,7 +73,7 @@ async def _asgi_request(
     query_string: str = "",
     json_body: dict | None = None,
 ) -> tuple[int, bytes]:
-    """Zero-dependency in-process ASGI caller for testing `openmrr.app_server.app`."""
+    """Zero-dependency in-process ASGI caller for testing `microring.app_server.app`."""
     raw_body = json.dumps(json_body).encode("utf-8") if json_body is not None else b""
     headers = [(b"host", b"127.0.0.1:8765")]
     if json_body is not None:
@@ -286,7 +295,7 @@ def test_http_endpoints_and_gds_upload() -> None:
             srv.GDS_UPLOAD_DIR = tmp_path / "uploads"
             try:
                 st, body = await _asgi_request("GET", "/")
-                assert st == 200 and b"OpenMRR Studio" in body and b"setLanguage('zh')" in body
+                assert st == 200 and b"MicroRing Studio" in body and b"setLanguage('zh')" in body
 
                 st, body = await _asgi_request("GET", "/api/materials")
                 assert st == 200 and len(json.loads(body)["materials"]) == 24
@@ -341,9 +350,9 @@ def test_http_endpoints_and_gds_upload() -> None:
 def test_agent_tools_and_mcp_minimal_tokens() -> None:
     # 1. MCP handshake + tools/list
     init_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-    assert init_resp is not None and init_resp["result"]["serverInfo"]["name"] == "openmrr-studio"
+    assert init_resp is not None and init_resp["result"]["serverInfo"]["name"] == "microring-studio"
     list_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    assert list_resp is not None and len(list_resp["result"]["tools"]) == 8
+    assert list_resp is not None and len(list_resp["result"]["tools"]) == 10
 
     # 2. Compact MCP design + critical coupling + GDS export (< 550 chars => < ~140 tokens!)
     call_resp = handle_mcp_request({
@@ -351,7 +360,7 @@ def test_agent_tools_and_mcp_minimal_tokens() -> None:
         "id": 3,
         "method": "tools/call",
         "params": {
-            "name": "openmrr_design_mrr",
+            "name": "microring_design_mrr",
             "arguments": {
                 "top": "pulley_ap",
                 "mat": "4H-SiC",
@@ -538,7 +547,7 @@ def test_fabrication_dose_and_pr_tolerance() -> None:
         "id": 99,
         "method": "tools/call",
         "params": {
-            "name": "openmrr_fab_tolerance",
+            "name": "microring_fab_tolerance",
             "arguments": {
                 "mat": "Si",
                 "h_um": 0.22,
@@ -705,7 +714,7 @@ def test_active_tuning_2d_fem_and_interconnect() -> None:
         "id": 108,
         "method": "tools/call",
         "params": {
-            "name": "openmrr_active_tuning",
+            "name": "microring_active_tuning",
             "arguments": {
                 "mat": "Si",
                 "h_um": 0.22,
@@ -727,6 +736,200 @@ def test_active_tuning_2d_fem_and_interconnect() -> None:
     assert Path(t_json["csv"]).is_file() and Path(t_json["interconnect_zip"]).is_file()
 
 
+def test_io_couplers_and_high_q_fdtd_convergence() -> None:
+    assert {"SMF28_1550", "Lensed_2p5um", "DFB_Laser_Butt", "MidIR_InF3"}.issubset(
+        FIBER_LASER_CATALOG.keys()
+    )
+
+    # 1. Butt / Edge Coupler (2D Vector Maxwell FEM + Poynting Overlap + Adiabatic EME)
+    butt_soi = design_butt_edge_coupler(
+        core_material="Si",
+        wavelength_nm=1550.0,
+        film_height_um=0.22,
+        w_bus_um=0.45,
+        taper_length_um=180.0,
+        fiber_preset="Lensed_2p5um",
+    )
+    assert 0.12 <= butt_soi["w_tip_um"] <= 0.28
+    assert butt_soi["metrics"]["total_il_db"] < 1.5
+    assert butt_soi["metrics"]["tol_1db_x_um"] > 0.25
+    assert butt_soi["metrics"]["return_loss_db"] > 25.0
+
+    butt_dfb = design_butt_edge_coupler(
+        core_material="Si3N4",
+        wavelength_nm=1310.0,
+        film_height_um=0.30,
+        w_bus_um=0.90,
+        taper_length_um=160.0,
+        fiber_preset="DFB_Laser_Butt",
+    )
+    assert butt_dfb["metrics"]["total_il_db"] < 1.5
+    assert butt_dfb["metrics"]["tol_1db_y_um"] > 0.18
+
+    # 2. Surface Grating Coupler (Bragg/Apodized Synthesis + Native 2D Full-Wave Maxwell FDFD)
+    gc_unif = design_grating_coupler(
+        core_material="Si",
+        wavelength_nm=1550.0,
+        film_height_um=0.22,
+        etch_depth_um=0.07,
+        fiber_angle_deg=10.0,
+        apodized=False,
+        focusing=True,
+        box_thickness_um=2.0,
+        fiber_preset="SMF28_1550",
+    )
+    gc_apod = design_grating_coupler(
+        core_material="Si",
+        wavelength_nm=1550.0,
+        film_height_um=0.22,
+        etch_depth_um=0.07,
+        fiber_angle_deg=10.0,
+        apodized=True,
+        focusing=True,
+        box_thickness_um=2.0,
+        fiber_preset="SMF28_1550",
+    )
+    assert 1.5 < gc_unif["metrics"]["peak_il_db"] < 4.5
+    assert 1.5 < gc_apod["metrics"]["peak_il_db"] < gc_unif["metrics"]["peak_il_db"] + 0.1
+    assert gc_apod["metrics"]["bw_1db_nm"] > 20.0
+    assert gc_apod["metrics"]["s11_db"] < -15.0
+    assert gc_apod["field_2d"] is not None and len(gc_apod["field_2d"]["E_norm"]) > 20
+
+    # 3. High-Q & Ultra-High-Q (Q > 1.5e7) Convergence + Coupler Cutout + GDS/INTERCONNECT/Copilot/HTTP/MCP
+    hq_seed = MRRDesignConfig(
+        topology="pulley_ap",
+        core_material="Si3N4",
+        film_height_um=0.40,
+        ring_width_um=1.30,
+        bus_width_um=0.95,
+        ring_radius_um=80.0,
+        gap_thru_um=0.35,
+        pulley_angle_thru_deg=14.0,
+        wavelength_nm=1550.0,
+        alpha_loss_db_per_cm=0.06,
+    )
+    hq_scout = simulate_mrr_topology(hq_seed)
+    cc_param = hq_scout["critical_coupling"]["parameter"]
+    cc_val = float(hq_scout["critical_coupling"]["recommended_value"])
+    hq_cfg = replace(hq_seed, **{cc_param: cc_val})
+
+    hq = analyze_high_q_fdtd_convergence(hq_cfg, sim_times_ps=[25.0, 200.0, 1000.0])
+    assert hq["Q_loaded"] > 2.0e6
+    assert hq["required_fdtd_sim_time_1e5_ns"] > 15.0
+    assert hq["true_converged_er_db"] > 25.0
+    assert hq["truncated_fdtd_traces"][0]["apparent_er_db"] < hq["true_converged_er_db"] - 10.0
+    assert hq["time_domain_speedup_factor"] > 10000
+
+    # Extreme Ultra-High-Q (alpha = 0.01 dB/cm -> Q_int ~ 3.6e7, Q_loaded ~ 1.8e7 at critical coupling)
+    uhq_seed = replace(hq_seed, topology="point_circular_ap", alpha_loss_db_per_cm=0.01, gap_thru_um=0.65, span_nm=2.0)
+    uhq_cc_gap = float(simulate_mrr_topology(uhq_seed)["critical_coupling"]["recommended_value"])
+    uhq_spec = simulate_mrr_topology(replace(uhq_seed, gap_thru_um=uhq_cc_gap))
+    assert uhq_spec["metrics"]["Q_loaded"] > 1.5e7
+    assert uhq_spec["metrics"]["FWHM_pm"] < 0.15
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        gds_loop = export_io_coupler_gds(
+            gc_apod, tmp_path / "gc_loopback.gds", include_ring_loopback=True, ring_config=hq_cfg
+        )
+        assert Path(gds_loop["gds_path"]).is_file() and Path(gds_loop["lyp_path"]).is_file()
+        assert len(gds_loop["cells"]) >= 3
+
+        ic_gc = export_io_coupler_interconnect(gc_apod, tmp_path / "ic_gc")
+        assert ic_gc["passivity_verified"] is True
+        assert Path(ic_gc["spar_path"]).is_file() and Path(ic_gc["zip_path"]).is_file()
+
+        cut = export_coupler_cutout_gds(hq_cfg, tmp_path / "cutout.gds")
+        assert Path(cut["gds_path"]).is_file() and Path(cut["lsf_path"]).is_file()
+
+        # Copilot EN + ZH turns
+        c_gc = process_chat_turn(
+            create_initial_session(lang="en"),
+            "Design apodized focusing grating coupler on 220 nm Si and export 127um loopback GDS",
+            gds_export_dir=tmp_path,
+        )
+        assert c_gc["ui_view"] == "io" and c_gc["io_result"]["coupler_type"] == "grating_coupler"
+        assert "gds_export" in c_gc
+
+        c_hq_zh = process_chat_turn(
+            create_initial_session(lang="zh"),
+            "为什么高Q氮化硅微环在 Lumerical FDTD 中很慢无法收敛？导出耦合区切片 GDS",
+            gds_export_dir=tmp_path,
+        )
+        assert c_hq_zh["ui_view"] == "io" and "high_q_result" in c_hq_zh and "gds_export" in c_hq_zh
+
+        # ASGI HTTP endpoints
+        async def _check_io_http() -> None:
+            old_exp = srv.GDS_EXPORT_DIR
+            srv.GDS_EXPORT_DIR = tmp_path / "srv_io"
+            try:
+                st1, b1 = await _asgi_request(
+                    "POST",
+                    "/api/io_coupler",
+                    json_body={"coupler_type": "butt_edge", "core_material": "Si", "film_height_um": 0.22, "fiber_preset": "Lensed_2p5um"},
+                )
+                d1 = json.loads(b1)
+                assert st1 == 200 and d1["coupler_type"] == "butt_edge"
+
+                st2, b2 = await _asgi_request(
+                    "POST",
+                    "/api/export_io_gds",
+                    json_body={"coupler_result": d1, "include_ring_loopback": True},
+                )
+                assert st2 == 200 and "gds_download_url" in json.loads(b2)
+
+                st3, b3 = await _asgi_request(
+                    "POST",
+                    "/api/export_io_interconnect",
+                    json_body={"coupler_result": d1},
+                )
+                assert st3 == 200 and json.loads(b3)["passivity_verified"] is True
+
+                st4, b4 = await _asgi_request(
+                    "POST",
+                    "/api/high_q_fdtd",
+                    json_body={"config": asdict(hq_cfg), "export_cutout": True},
+                )
+                d4 = json.loads(b4)
+                assert st4 == 200 and "cutout" in d4 and "lsf_download_url" in d4["cutout"]
+            finally:
+                srv.GDS_EXPORT_DIR = old_exp
+
+        asyncio.run(_check_io_http())
+
+    # Agent CLI helpers & MCP (<150 tokens)
+    a_io = agent_io_coupler({"coupler_type": "butt_edge", "mat": "Si", "h_um": 0.22, "export_gds": True})
+    assert a_io["IL_total_dB"] < 1.5 and Path(a_io["gds"]).is_file()
+    a_hq = agent_high_q_fdtd({"mat": "Si3N4", "r_um": 80.0, "loss_db_cm": 0.08, "apply_cc": True, "export_cutout_gds": True})
+    assert a_hq["Q_L"] > 1.5e6 and Path(a_hq["cutout_gds"]).is_file()
+
+    mcp_io = handle_mcp_request({
+        "jsonrpc": "2.0",
+        "id": 112,
+        "method": "tools/call",
+        "params": {
+            "name": "microring_io_coupler",
+            "arguments": {"coupler_type": "grating_coupler", "mat": "Si", "h_um": 0.22, "etch_um": 0.07, "export_interconnect": True},
+        },
+    })
+    assert mcp_io is not None and not mcp_io["result"]["isError"]
+    io_txt = mcp_io["result"]["content"][0]["text"]
+    assert len(io_txt) < 620, f"MCP io_coupler too verbose ({len(io_txt)} chars): {io_txt}"
+
+    mcp_hq = handle_mcp_request({
+        "jsonrpc": "2.0",
+        "id": 113,
+        "method": "tools/call",
+        "params": {
+            "name": "microring_high_q_fdtd",
+            "arguments": {"mat": "Si3N4", "r_um": 90.0, "loss_db_cm": 0.08, "gap_um": 0.38, "export_cutout_gds": True},
+        },
+    })
+    assert mcp_hq is not None and not mcp_hq["result"]["isError"]
+    hq_txt = mcp_hq["result"]["content"][0]["text"]
+    assert len(hq_txt) < 620, f"MCP high_q_fdtd too verbose ({len(hq_txt)} chars): {hq_txt}"
+
+
 def main() -> None:
     tests = [
         ("Materials & Hardware Probe", test_materials_and_hardware),
@@ -740,9 +943,10 @@ def main() -> None:
         ("Multi-Waveband Physics (Visible 532nm / O-Band 1310nm / Mid-IR 4.2um)", test_multiband_vis_1310_midir_and_warnings),
         ("Cleanroom Lithography Positive/Negative PR Dose & OPC Bias GDS", test_fabrication_dose_and_pr_tolerance),
         ("2D-FEM TO/EO/Si-PN Active Tuning, T/E/V/I Spectra & Lumerical INTERCONNECT", test_active_tuning_2d_fem_and_interconnect),
+        ("Photonic IC Butt/2D-FDFD Grating Couplers & High-Q FDTD Convergence", test_io_couplers_and_high_q_fdtd_convergence),
     ]
     print("=" * 72)
-    print("Running OpenMRR Studio v3.4.0 Full Verification Suite")
+    print("Running MicroRing Studio v3.5.0 Full Verification Suite")
     print("=" * 72)
     for label, fn in tests:
         print(f"[RUN ] {label} ...", flush=True)

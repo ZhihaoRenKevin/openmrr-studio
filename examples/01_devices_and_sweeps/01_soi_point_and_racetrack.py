@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import MRRDesignConfig, run_mrr_parameter_sweep, simulate_mrr_topology
+from microring import MRRDesignConfig, run_mrr_parameter_sweep, simulate_mrr_topology
 
 # ---------------- Top-Level Physical & Geometric Parameters ----------------
 WAVELENGTH_NM = 1550.0        # unit: nm

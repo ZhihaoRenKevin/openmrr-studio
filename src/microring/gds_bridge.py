@@ -1,4 +1,4 @@
-"""Bidirectional GDSII / OASIS Layout Bridge (`openmrr.gds_bridge`).
+"""Bidirectional GDSII / OASIS Layout Bridge (`microring.gds_bridge`).
 
 Supports BOTH directions of layout-driven integrated photonics design:
   1. **GDS -> Geometry Extraction -> Eigenmode/CMT Simulation (`analyze_uploaded_gds`)**:
@@ -25,23 +25,25 @@ from shapely.ops import nearest_points, unary_union
 
 from .mrr_topologies import MRRDesignConfig, TOPOLOGY_CATALOG, export_mrr_gds
 
-# Standard OpenMRR role-to-GDS layer table (compatible with KLayout .lyp export)
-OPENMRR_LAYERS: dict[str, tuple[int, int, str, str]] = {
+# Standard MicroRing role-to-GDS layer table (compatible with KLayout .lyp export)
+MICRORING_LAYERS: dict[str, tuple[int, int, str, str]] = {
     "core": (1, 0, "#38bdf8", "Waveguide Core Etch"),
     "slab": (2, 0, "#0284c7", "Partial Rib Slab"),
+    "shallow_etch": (4, 0, "#0ea5e9", "Grating Coupler Shallow Etch Grooves"),
     "heater": (10, 0, "#f59e0b", "TiN Thermo-Optic Heater"),
     "electrode": (11, 0, "#eab308", "GSG Electro-Optic Pads"),
+    "facet_trench": (40, 0, "#f43f5e", "Deep Facet Dicing / Undercut Trench"),
     "pin": (65, 0, "#34d399", "Optical Port Pin"),
     "label": (66, 0, "#e2e8f0", "Annotation Text"),
 }
 
 
 def write_klayout_layer_props(output_lyp_path: str | Path) -> str:
-    """Write a KLayout `.lyp` layer-properties file matching `OPENMRR_LAYERS`."""
+    """Write a KLayout `.lyp` layer-properties file matching `MICRORING_LAYERS`."""
     out = Path(output_lyp_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     blocks = []
-    for role, (lyr, dt, hex_col, desc) in OPENMRR_LAYERS.items():
+    for role, (lyr, dt, hex_col, desc) in MICRORING_LAYERS.items():
         blocks.append(
             f"""  <properties>
     <frame-color>{hex_col}</frame-color>
@@ -74,7 +76,7 @@ def export_sweep_array_gds(
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     lib = gdstk.Library(unit=1e-6, precision=1e-9)
-    top = lib.new_cell(f"OpenMRR_Sweep_{param_name}")
+    top = lib.new_cell(f"MicroRing_Sweep_{param_name}")
 
     default_span = 2.6 * base_cfg.ring_radius_um + base_cfg.straight_length_um + 55.0
     dx_pitch = float(pitch_x_um) if pitch_x_um is not None else max(default_span, 140.0)
@@ -179,7 +181,7 @@ def analyze_uploaded_gds(
         tops = lib.top_level()
         target_cell = tops[0] if tops else lib.cells[0]
 
-    flat = target_cell.copy("._openmrr_flat_inspect")
+    flat = target_cell.copy("._microring_flat_inspect")
     flat.flatten()
     scale_to_um = float(lib.unit) / 1e-6
 
@@ -228,10 +230,86 @@ def analyze_uploaded_gds(
     buses = [g for g in geoms if len(g.interiors) == 0 and g.area > 0.5]
 
     if not annuli:
-        raise ValueError(
-            f"No closed ring or racetrack cavity (annular polygon) detected on layer {chosen_layer}. "
-            f"Available layers: {layer_summary}"
-        )
+        # Non-resonant I/O coupler (Butt taper / Grating Coupler) or Single-Pass Coupler Cutout GDS
+        viewer_layers = []
+        for (lyr, dt), pts_list in sorted(by_layer.items()):
+            polys_serialized = []
+            for pts in pts_list[:160]:
+                stride = max(1, len(pts) // 180)
+                polys_serialized.append(np.round(pts[::stride], 3).tolist())
+            viewer_layers.append({
+                "layer": lyr,
+                "datatype": dt,
+                "is_core": (lyr, dt) == chosen_layer,
+                "polygons": polys_serialized,
+            })
+        all_pts = np.vstack([pts for pts_list in by_layer.values() for pts in pts_list])
+        bbox_um = [
+            round(float(np.min(all_pts[:, 0])), 3),
+            round(float(np.min(all_pts[:, 1])), 3),
+            round(float(np.max(all_pts[:, 0])), 3),
+            round(float(np.max(all_pts[:, 1])), 3),
+        ]
+        gap_markers = []
+        gap_measured = 0.0
+        w_bus_est = 0.50
+        buses_sorted = sorted(buses, key=lambda g: -g.area)
+        if buses_sorted:
+            c0 = buses_sorted[0].centroid
+            w_bus_est = _measure_local_bus_width(buses_sorted[0], c0)
+        if len(buses_sorted) >= 2:
+            d12 = float(buses_sorted[0].exterior.distance(buses_sorted[1].exterior))
+            if d12 <= 5.0:
+                p1, p2 = nearest_points(buses_sorted[0].exterior, buses_sorted[1].exterior)
+                gap_measured = round(d12, 4)
+                gap_markers.append({
+                    "ring_pt": [round(p1.x, 4), round(p1.y, 4)],
+                    "bus_pt": [round(p2.x, 4), round(p2.y, 4)],
+                    "gap_um": gap_measured,
+                })
+        has_gc_etch = (40, 0) in by_layer
+        if has_gc_etch:
+            disp_name = "Surface Grating Coupler (I/O)"
+            top_code = "grating_coupler_io"
+            n_ports = 2
+        elif gap_measured > 0.0:
+            disp_name = "Single-Pass Coupler Cutout"
+            top_code = "coupler_cutout_4p"
+            n_ports = 4
+        else:
+            disp_name = "Butt / Edge Taper Coupler (I/O)"
+            top_code = "butt_coupler_io"
+            n_ports = 2
+        span_x = round(bbox_um[2] - bbox_um[0], 3)
+        span_y = round(bbox_um[3] - bbox_um[1], 3)
+        return {
+            "file_name": p.name,
+            "cell_name": target_cell.name,
+            "available_cells": [c.name for c in lib.cells],
+            "layers": layer_summary,
+            "selected_core_layer": list(chosen_layer),
+            "bbox_um": bbox_um,
+            "extracted_geometry": {
+                "is_non_ring": True,
+                "topology": top_code,
+                "topology_display": disp_name,
+                "footprint_x_um": span_x,
+                "footprint_y_um": span_y,
+                "ring_radius_um": 0.0,
+                "ring2_radius_um": 0.0,
+                "ring_width_um": w_bus_est,
+                "bus_width_um": w_bus_est,
+                "gap_thru_um": gap_measured,
+                "gap_drop_um": gap_measured,
+                "inter_ring_gap_um": 0.0,
+                "straight_length_um": span_x,
+                "pulley_angle_thru_deg": 0.0,
+                "ports_detected": n_ports,
+            },
+            "gap_markers": gap_markers,
+            "viewer_layers": viewer_layers,
+            "note": f"Non-resonant Photonic IC component ({disp_name}, footprint {span_x} x {span_y} um).",
+        }
 
     # Order rings from top-to-bottom, left-to-right so Ring 1 is primary input-coupled cavity
     annuli.sort(key=lambda g: (-round(g.centroid.y, 2), round(g.centroid.x, 2)))

@@ -161,7 +161,7 @@ def _select_target_polarization(modes: list[EigenmodeResult], pol: str) -> Eigen
 
 def get_default_output_root() -> Path:
     """Return a writable output directory across repo clones, pip installs, and frozen .app/.exe apps."""
-    env_dir = os.environ.get("OPENMRR_OUTPUT_DIR")
+    env_dir = os.environ.get("MICRORING_OUTPUT_DIR")
     if env_dir:
         return Path(env_dir)
     if not getattr(sys, "frozen", False):
@@ -170,12 +170,12 @@ def get_default_output_root() -> Path:
             return repo_candidate / "outputs"
     docs = Path.home() / "Documents"
     base = docs if docs.is_dir() else Path.home()
-    return base / "OpenMRR_Studio"
+    return base / "MicroRing_Studio"
 
 
 _MODE_MEM_CACHE: dict[str, EigenmodeResult] = {}
 _CACHE_DIR = Path(
-    os.environ.get("OPENMRR_CACHE_DIR", str(get_default_output_root() / ".mode_cache"))
+    os.environ.get("MICRORING_CACHE_DIR", str(get_default_output_root() / ".mode_cache"))
 )
 
 
@@ -192,7 +192,7 @@ def _mode_cache_key(
     cl_val = spec.clad_material_fn(wavelength_m, spec.temperature_k) if spec.clad_material_fn else None
     tp_val = spec.top_clad_material_fn(wavelength_m, spec.temperature_k) if spec.top_clad_material_fn else cl_val
     payload = {
-        "v": "openmrr_v3_fem1",
+        "v": "microring_v3_fem1",
         "geom": [
             round(spec.w_bottom_um, 6),
             round(spec.h_film_um, 6),
@@ -542,12 +542,13 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             else float(cfg.core_mesh_res_um)
         )
     )
+    uhq_gap_floor = round(2.20 * wl_scale, 3) if alpha_db_cm < 0.08 else 0.0
     box_pad_um = 2.5 if abs(wl_scale - 1.0) < 0.05 else round(max(1.8, 1.35 * wl_um), 3)
-    max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, round(0.72 * wl_um, 3), 0.70)
+    max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, round(0.72 * wl_um, 3), 0.70, uhq_gap_floor)
     x_max_ring_um = max(2.2 * wl_scale, 0.5 * cfg.ring_width_um + max_gap_um + cfg.bus_width_um + 0.65 * wl_um + 0.25)
     x_min_ring_um = -max(1.9 * wl_scale, 0.5 * cfg.ring_width_um + 1.15 * wl_um)
     if abs(wl_scale - 1.0) < 0.05:
-        max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, 1.10)
+        max_gap_um = max(cfg.gap_thru_um, cfg.gap_drop_um, cfg.inter_ring_gap_um, 1.10, uhq_gap_floor)
         x_max_ring_um = max(3.0, 0.5 * cfg.ring_width_um + max_gap_um + cfg.bus_width_um + 0.9)
         x_min_ring_um = -max(2.6, 0.5 * cfg.ring_width_um + 1.8)
     if cfg.ring_radius_um > 0:
@@ -579,6 +580,8 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
     )
 
     bus_dom_w = 5.2 if abs(wl_scale - 1.0) < 0.05 else max(3.4 * wl_scale, cfg.bus_width_um + 2.4 * wl_um)
+    if uhq_gap_floor > 0.0:
+        bus_dom_w = max(bus_dom_w, cfg.bus_width_um + 2.0 * max_gap_um + 1.6 * wl_scale)
     bus_spec = WaveguideCrossSectionSpec(
         w_bottom_um=cfg.bus_width_um,
         h_film_um=cfg.film_height_um,
@@ -796,7 +799,7 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
                 )
                 if is_4port else 0.0
             )
-            g_sweep = np.linspace(g_min_um, min(g_max_um * 0.85, max(0.90 * wl_scale, 0.55)), 42)
+            g_sweep = np.linspace(g_min_um, g_max_um * 0.92, 48)
             kp_sweep = np.array([
                 _point_coupler_kappa_power_from_gap_curve(float(g), cfg.ring_radius_um, gaps_grid, kd_grid, beta_ring_c, beta_bus_c)
                 for g in g_sweep
@@ -998,8 +1001,11 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             continue
         lam_res = num_r / den_r
         if wl_min_nm <= lam_res <= wl_max_nm:
-            hw_dense = max(min(3.0 * fwhm_nm, 0.25 * fsr_nm), 1e-5)
-            cluster = np.linspace(max(wl_min_nm, lam_res - hw_dense), min(wl_max_nm, lam_res + hw_dense), 65)
+            hw_dense = max(min(5.0 * fwhm_nm, 0.25 * fsr_nm), 1e-7)
+            # Lorentzian-graded sinh cluster around lam_res resolves Q up to 1e8+ (sub-femtometer FWHM)
+            u_lin = np.linspace(-1.0, 1.0, 129)
+            cluster = lam_res + hw_dense * np.sinh(2.2 * u_lin) / math.sinh(2.2)
+            cluster = np.clip(cluster, wl_min_nm, wl_max_nm)
             dense_clusters.append(np.append(cluster, lam_res))
     wl_vec = np.unique(np.concatenate(dense_clusters))
 
@@ -1053,7 +1059,13 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
         10.0 * np.log10(np.maximum(drop_arr, 1e-6))
         if is_4port else np.full_like(thru_arr, -60.0)
     )
-    q_ext_vec = np.asarray(coupler_sweep["Q_ext"], dtype=float)
+    # High-Q cavity photon-lifetime & FDTD time-domain ring-down diagnostics
+    omega0_rad_s = 2.0 * math.pi * C0_M_PER_S / (cfg.wavelength_nm * 1e-9)
+    tau_ph_ps = (q_loaded / omega0_rad_s) * 1e12
+    t_rt_ps = (ng_rt * (l_rt_um * 1e-6) / C0_M_PER_S) * 1e12
+    # Energy decay exp(-t / tau_ph) <= 1e-5 requires t >= ln(1e5) * tau_ph = 11.5129 * tau_ph
+    fdtd_shutoff_1e5_ps = math.log(1e5) * tau_ph_ps
+    fdtd_roundtrips_1e5 = fdtd_shutoff_1e5_ps / max(t_rt_ps, 1e-6)
 
     return {
         "elapsed_ms": round((time.perf_counter() - t_sim_start) * 1e3, 1),
@@ -1091,6 +1103,10 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             "alpha_loss_db_per_cm": alpha_db_cm,
             "tuning_shift_pm": tuning_info["resonance_shift_pm"],
             "eo_tunability_pm_per_v": tuning_info["electro_optic_pm_per_v"],
+            "photon_lifetime_ps": round(tau_ph_ps, 3),
+            "roundtrip_time_ps": round(t_rt_ps, 4),
+            "fdtd_shutoff_1e5_ps": round(fdtd_shutoff_1e5_ps, 2),
+            "fdtd_roundtrips_1e5": round(fdtd_roundtrips_1e5, 1),
             "compute_backend": comp_backend,
         },
         "critical_coupling": {
@@ -1104,14 +1120,14 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
             "x_param": coupler_sweep["param_name"],
             "x_unit": coupler_sweep["param_unit"],
             "x_values": coupler_sweep["x_values"],
-            "log10_Q_ext": np.round(np.log10(np.maximum(q_ext_vec, 1.0)), 4).tolist(),
+            "log10_Q_ext": np.round(np.log10(np.maximum(np.asarray(coupler_sweep["Q_ext"], dtype=float), 1.0)), 4).tolist(),
         },
         "vernier": vernier_summary,
         "tuning": tuning_info,
         "wavelength_warnings": wavelength_warnings,
         "coupler_sweep": coupler_sweep,
         "spectrum": {
-            "wavelength_nm": np.round(wl_vec, 5).tolist(),
+            "wavelength_nm": np.round(wl_vec, 7).tolist(),
             "thru_T": np.round(thru_arr, 6).tolist(),
             "drop_T": np.round(drop_arr, 6).tolist(),
             "thru_dB": np.round(thru_db_arr, 3).tolist(),
@@ -1121,14 +1137,12 @@ def simulate_mrr_topology(cfg: MRRDesignConfig) -> dict:
     }
 
 
-def export_mrr_gds(cfg: MRRDesignConfig, output_path: str | Path) -> str:
-    """Export foundry-ready GDSII layout (`.gds`) for any of the 7 MRR topologies via `gdstk`."""
+def build_mrr_gds_library(cfg: MRRDesignConfig):
+    """Build in-memory `gdstk.Library` for any of the 7 MRR topologies."""
     import gdstk
 
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
     lib = gdstk.Library(unit=1e-6, precision=1e-9)
-    cell = lib.new_cell(f"OpenMRR_{cfg.topology}_{cfg.core_material}")
+    cell = lib.new_cell(f"MicroRing_{cfg.topology}_{cfg.core_material}")
 
     L_CORE = 1
     L_SLAB = 2
@@ -1241,9 +1255,191 @@ def export_mrr_gds(cfg: MRRDesignConfig, output_path: str | Path) -> str:
             ))
 
     cell.add(gdstk.Label(
-        f"OpenMRR {cfg.topology} | {cfg.core_material} | R={r1:.1f}um W={wr:.2f}um g={g1*1e3:.0f}nm",
+        f"MicroRing {cfg.topology} | {cfg.core_material} | R={r1:.1f}um W={wr:.2f}um g={g1*1e3:.0f}nm",
         (0.0, r1 + 8.0),
         layer=L_TEXT,
     ))
+    return lib
+
+
+def export_mrr_gds(cfg: MRRDesignConfig, output_path: str | Path) -> str:
+    """Export foundry-ready GDSII layout (`.gds`) for any of the 7 MRR topologies via `gdstk`."""
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    lib = build_mrr_gds_library(cfg)
     lib.write_gds(str(out))
     return str(out.resolve())
+
+
+def analyze_high_q_fdtd_convergence(
+    cfg: MRRDesignConfig,
+    sim_times_ps: list[float] | None = None,
+) -> dict:
+    """Quantify why full-ring 3D FDTD fails to converge at High-Q and compare truncated FDTD vs exact infinite-roundtrip TMM.
+
+    Computes the exact finite-M round-trip impulse-response sum experienced when a time-domain
+    FDTD solver terminates at `t_sim` (e.g., 10 ps, 50 ps, 250 ps) before `auto shutoff min = 1e-5`,
+    overlaying the resulting sinc-ringing & collapsed extinction ratio against MicroRing Studio's
+    exact infinite-roundtrip frequency-domain solution (`M -> infinity`, solved in ~1 s for any Q).
+    """
+    res = simulate_mrr_topology(cfg)
+    m = res["metrics"]
+    q_l = float(m["Q_loaded"])
+    tau_ph_ps = float(m["photon_lifetime_ps"])
+    t_rt_ps = float(m["roundtrip_time_ps"])
+    t_1e5_ps = float(m["fdtd_shutoff_1e5_ps"])
+    l_rt_um = float(m["roundtrip_length_um"])
+    neff_rt = float(m["neff_ring"])
+    ng_rt = float(m["ng_ring"])
+    kp1 = float(m["kappa_power_thru"])
+    kp2 = float(m["kappa_power_drop"])
+    alpha_db_cm = float(m["alpha_loss_db_per_cm"])
+
+    tau1 = math.sqrt(max(1.0 - kp1, 0.0))
+    tau2 = math.sqrt(max(1.0 - kp2, 0.0))
+    alpha_m = alpha_db_cm * 100.0 * math.log(10.0) / 10.0
+    a_rt = math.exp(-0.5 * alpha_m * (l_rt_um * 1e-6))
+    fb_gain = tau1 * tau2 * a_rt
+
+    # Center zoom window (+/- 8 FWHM around nearest resonance to cfg.wavelength_nm)
+    fwhm_nm = max(cfg.wavelength_nm / max(q_l, 100.0), 1e-7)
+    dn_dlam = -(ng_rt - neff_rt) / cfg.wavelength_nm
+    m_ord = max(1, int(round(neff_rt * (l_rt_um * 1e3) / cfg.wavelength_nm)))
+    lam_res = ((neff_rt - dn_dlam * cfg.wavelength_nm) * (l_rt_um * 1e3)) / (m_ord - dn_dlam * (l_rt_um * 1e3))
+
+    det_pm = np.linspace(-8.0 * fwhm_nm * 1e3, 8.0 * fwhm_nm * 1e3, 301)
+    wl_zoom_nm = lam_res + det_pm * 1e-3
+    neff_w = neff_rt + dn_dlam * (wl_zoom_nm - cfg.wavelength_nm)
+    phi = 2.0 * math.pi * neff_w * (l_rt_um * 1e3) / wl_zoom_nm
+    z_fb = fb_gain * np.exp(1j * phi)
+
+    # Exact infinite-roundtrip converged transmission (M -> inf):
+    # t_inf = tau1 - kp1 * tau2 * a_rt * exp(i*phi) / (1 - fb_gain * exp(i*phi))
+    t_inf = tau1 - (kp1 * tau2 * a_rt * np.exp(1j * phi)) / (1.0 - z_fb)
+    thru_inf_db = 20.0 * np.log10(np.maximum(np.abs(t_inf), 1e-6))
+    er_inf_db = float(np.max(thru_inf_db) - np.min(thru_inf_db))
+
+    if sim_times_ps is None:
+        # Pick 3 illustrative FDTD cutoff times showing under-converged vs partially-converged behavior
+        sim_times_ps = [
+            round(max(1.0, 0.02 * t_1e5_ps), 2),
+            round(max(10.0, 0.12 * t_1e5_ps), 2),
+            round(max(50.0, 0.35 * t_1e5_ps), 2),
+        ]
+
+    truncated_traces = []
+    for t_ps in sim_times_ps:
+        n_rt = max(1, int(math.floor(float(t_ps) / max(t_rt_ps, 1e-5))))
+        # Exact geometric partial sum sum_{k=1}^{n_rt} z_fb^k = z_fb * (1 - z_fb^n_rt) / (1 - z_fb)
+        geom_sum = z_fb * (1.0 - np.power(z_fb, n_rt)) / (1.0 - z_fb)
+        t_tr = tau1 - (kp1 / max(tau1, 1e-9)) * geom_sum
+        tr_db = 20.0 * np.log10(np.maximum(np.abs(t_tr), 1e-6))
+        residual_shutoff = float(math.exp(-float(t_ps) / max(tau_ph_ps, 1e-6)))
+        er_apparent_db = float(np.max(tr_db) - np.min(tr_db))
+        truncated_traces.append({
+            "fdtd_sim_time_ps": float(t_ps),
+            "completed_roundtrips": n_rt,
+            "residual_energy_shutoff": round(residual_shutoff, 6),
+            "converged_1e5": bool(residual_shutoff <= 1e-5),
+            "apparent_er_db": round(er_apparent_db, 2),
+            "er_error_db": round(abs(er_inf_db - er_apparent_db), 2),
+            "thru_dB": np.round(tr_db, 3).tolist(),
+        })
+
+    # Single-pass coupler transit time for hybrid coupler-only 3D FDTD (typically ~25 um -> ~0.25 ps!)
+    coupler_len_um = max(20.0, cfg.straight_length_um + 16.0)
+    t_coupler_only_ps = round(3.5 * (ng_rt * coupler_len_um * 1e-6 / C0_M_PER_S) * 1e12, 3)
+    speedup_vs_full_ring = round(t_1e5_ps / max(t_coupler_only_ps, 0.05), 0)
+
+    return {
+        "Q_loaded": round(q_l, 0),
+        "Q_int": m["Q_int"],
+        "FWHM_pm": m["FWHM_pm"],
+        "resonance_wavelength_nm": round(float(lam_res), 6),
+        "photon_lifetime_ps": round(tau_ph_ps, 3),
+        "roundtrip_time_ps": round(t_rt_ps, 4),
+        "required_fdtd_sim_time_1e5_ps": round(t_1e5_ps, 2),
+        "required_fdtd_sim_time_1e5_ns": round(t_1e5_ps * 1e-3, 4),
+        "required_fdtd_roundtrips_1e5": round(float(m["fdtd_roundtrips_1e5"]), 1),
+        "coupler_only_fdtd_time_ps": t_coupler_only_ps,
+        "time_domain_speedup_factor": speedup_vs_full_ring,
+        "true_converged_er_db": round(er_inf_db, 2),
+        "detuning_pm": np.round(det_pm, 5).tolist(),
+        "converged_infinite_rt_thru_dB": np.round(thru_inf_db, 3).tolist(),
+        "truncated_fdtd_traces": truncated_traces,
+    }
+
+
+def export_coupler_cutout_gds(cfg: MRRDesignConfig, out_dir: str | Path | None = None) -> dict:
+    """Export non-resonant Coupler-Only Cutout `.GDS` + Lumerical 3D-FDTD `.lsf` (`~0.8 ps` vs `20 ns` full ring)."""
+    import gdstk
+    from .gds_bridge import write_klayout_layer_props
+
+    if out_dir is None:
+        root = get_default_output_root()
+        root.mkdir(parents=True, exist_ok=True)
+        gds_path = root / f"MicroRing_CouplerCutout_{cfg.topology}_{cfg.core_material}.gds"
+    else:
+        p_in = Path(out_dir)
+        if p_in.suffix.lower() == ".gds":
+            p_in.parent.mkdir(parents=True, exist_ok=True)
+            gds_path = p_in
+            root = p_in.parent
+        else:
+            p_in.mkdir(parents=True, exist_ok=True)
+            root = p_in
+            gds_path = root / f"MicroRing_CouplerCutout_{cfg.topology}_{cfg.core_material}.gds"
+    lsf_path = root / f"run_coupler_only_3dfdtd_{cfg.core_material}.lsf"
+    lyp_path = gds_path.with_suffix(".lyp")
+
+    lib = gdstk.Library(unit=1e-6, precision=1e-9)
+    cell = lib.new_cell(f"CouplerCutout_{cfg.core_material}")
+    r1 = cfg.ring_radius_um
+    wr = cfg.ring_width_um
+    wb = cfg.bus_width_um
+    g1 = cfg.gap_thru_um
+    ls = cfg.straight_length_um if cfg.topology.startswith("racetrack") else 0.0
+    half_span_x = max(12.0, 0.5 * ls + min(r1 * 0.65, 16.0))
+
+    # Straight bus segment across coupling zone
+    y_bus = r1 + 0.5 * wr + g1 + 0.5 * wb
+    b1 = gdstk.RobustPath((-half_span_x, y_bus), wb, layer=1, datatype=0, tolerance=0.002)
+    b1.segment((half_span_x, y_bus))
+    cell.add(b1)
+
+    # Upper ring arc / straight section only (terminated cleanly inside FDTD PML so zero cavity resonance!)
+    ang_span = min(math.pi * 0.42, math.asin(min(0.95, half_span_x / max(r1, 2.0))))
+    a0 = 0.5 * math.pi + ang_span
+    a1 = 0.5 * math.pi - ang_span
+    if ls > 0:
+        rp = gdstk.RobustPath((-0.5 * ls - r1 * math.sin(ang_span), r1 * math.cos(ang_span)), wr, layer=1, datatype=0, tolerance=0.002)
+        rp.arc(r1, a0, 0.5 * math.pi)
+        rp.segment((0.5 * ls, r1))
+        rp.arc(r1, 0.5 * math.pi, a1)
+    else:
+        rp = gdstk.RobustPath((r1 * math.cos(a0), r1 * math.sin(a0)), wr, layer=1, datatype=0, tolerance=0.002)
+        rp.arc(r1, a0, a1)
+    cell.add(rp)
+    lib.write_gds(str(gds_path))
+
+    lsf_txt = f"""# MicroRing Studio - Non-Resonant Single-Pass Coupler 3D-FDTD Script
+# Solves kappa^2 in ~0.5 ps (zero High-Q ring-down stall!) and plugs directly back into MicroRing Studio.
+newproject; redrawoff;
+gdsimport("{gds_path.name}", "{cell.name}", "1:0", "{cfg.core_material}", 0, {cfg.film_height_um}e-6);
+addfdtd;
+set("x", 0); set("x span", {2.0*half_span_x - 2.0:.2f}e-6);
+set("y", {(r1 + y_bus)*0.5:.3f}e-6); set("y span", {max(8.0, wr + wb + g1 + 6.0):.2f}e-6);
+set("z", {0.5*cfg.film_height_um:.3f}e-6); set("z span", 3.2e-6);
+set("simulation time", 800e-15); # Only 0.8 ps needed (single pass, no resonant ring-down!)
+set("auto shutoff min", 1e-6);
+?"Coupler-only FDTD region configured (0.8 ps simulation time, zero High-Q ring-down stall).";
+"""
+    lsf_path.write_text(lsf_txt, encoding="utf-8")
+    write_klayout_layer_props(lyp_path)
+    return {
+        "gds_path": str(gds_path),
+        "lyp_path": str(lyp_path),
+        "lsf_path": str(lsf_path),
+        "span_um": round(2.0 * half_span_x, 2),
+        "recommended_fdtd_time_ps": 0.8,
+    }

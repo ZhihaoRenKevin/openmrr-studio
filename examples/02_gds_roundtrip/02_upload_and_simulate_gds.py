@@ -1,6 +1,6 @@
 """Recipe 02b: Upload / Read Any External `.gds` -> Auto-Extract Geometry -> Simulate Spectrum.
 
-Demonstrates how OpenMRR Studio inspects raw GDSII polygons (`gdstk` + `shapely`),
+Demonstrates how MicroRing Studio inspects raw GDSII polygons (`gdstk` + `shapely`),
 identifies the topology (`Circular` / `Racetrack` / `Pulley` / `Dual-Ring Vernier`),
 measures `R`, `W_ring`, `W_bus`, `gap`, `L_s`, and `pulley_angle` without Python object
 metadata, and feeds those exact dimensions straight into the 2D FEM + CMT solver.
@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import MRRDesignConfig, analyze_uploaded_gds, export_mrr_gds, simulate_mrr_topology
+from microring import MRRDesignConfig, analyze_uploaded_gds, export_mrr_gds, simulate_mrr_topology
 
 
 def main() -> None:

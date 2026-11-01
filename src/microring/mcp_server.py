@@ -1,6 +1,6 @@
-"""Zero-Dependency Model Context Protocol (`MCP`) Stdio Server (`openmrr mcp`).
+"""Zero-Dependency Model Context Protocol (`MCP`) Stdio Server (`microring mcp`).
 
-Connects `OpenMRR Studio` directly to **Claude Code**, **Claude Desktop**, **OpenAI Codex**,
+Connects `MicroRing Studio` directly to **Claude Code**, **Claude Desktop**, **OpenAI Codex**,
 **Cursor**, and **Antigravity** over JSON-RPC 2.0 (`stdin`/`stdout`).
 
 Token-efficiency guarantees:
@@ -20,7 +20,9 @@ from .agent_tools import (
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
+    agent_high_q_fdtd,
     agent_inspect_gds,
+    agent_io_coupler,
     agent_status,
     agent_sweep_mrr,
     agent_width_cutoff,
@@ -28,12 +30,12 @@ from .agent_tools import (
 
 MCP_TOOLS = [
     {
-        "name": "openmrr_status",
+        "name": "microring_status",
         "description": "Probe local GPU/AMX/CPU accelerator & list supported 18 materials and 7 MRR topologies.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "openmrr_width_cutoff",
+        "name": "microring_width_cutoff",
         "description": "Sweep waveguide width via local 2D FEM to find exact single-mode cutoff W_SM and n_eff/n_g.",
         "inputSchema": {
             "type": "object",
@@ -50,7 +52,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_design_mrr",
+        "name": "microring_design_mrr",
         "description": "Run local 2D bent FEM + spatial CMT + TMM spectrum for an MRR; optional target FSR, critical coupling & GDS export.",
         "inputSchema": {
             "type": "object",
@@ -74,7 +76,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_sweep_mrr",
+        "name": "microring_sweep_mrr",
         "description": "Sweep gap, pulley angle, straight length, radius, temp, or voltage locally (reusing cached FEM modes).",
         "inputSchema": {
             "type": "object",
@@ -96,7 +98,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_inspect_gds",
+        "name": "microring_inspect_gds",
         "description": "Extract MRR topology, R, W_ring, W_bus, gap, L_s & pulley angle from a local .gds/.oas file.",
         "inputSchema": {
             "type": "object",
@@ -108,7 +110,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_fit_spectrum",
+        "name": "microring_fit_spectrum",
         "description": "Fit a local lab spectrum CSV/TXT via CMT (auto BIC: Lorentzian / Split-Doublet / Fano / Multi-FSR).",
         "inputSchema": {
             "type": "object",
@@ -122,7 +124,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_fab_tolerance",
+        "name": "microring_fab_tolerance",
         "description": "Analyze cleanroom lithography over-dose/under-dose (positive_pr vs negative_pr) and CD-bias errors on ER, Q_L, and resonance shift; optional pre-biased OPC .gds array.",
         "inputSchema": {
             "type": "object",
@@ -144,7 +146,7 @@ MCP_TOOLS = [
         },
     },
     {
-        "name": "openmrr_active_tuning",
+        "name": "microring_active_tuning",
         "description": "Compute 2D-FEM TO/EO/Si-PN/Si-PIN tuning efficiency & multi-state spectra (V, I, P, Delta_T, or E-field) linked to cross-section geometry (zero COMSOL), plus optional Lumerical INTERCONNECT export.",
         "inputSchema": {
             "type": "object",
@@ -170,17 +172,65 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "microring_io_coupler",
+        "description": "Design Butt/Edge Inverse-Taper Couplers (2D FEM + Poynting overlap + alignment tolerance) or Surface Grating Couplers (Bragg/apodization + Native 2D Full-Wave Maxwell FDFD), plus focusing .gds, 127um FA ring loopback .gds & INTERCONNECT export.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "coupler_type": {"type": "string", "description": "butt_edge or grating_coupler"},
+                "mat": {"type": "string", "description": "Core material (Si, Si3N4, 4H-SiC, LN_Xcut, AlN, Ge)"},
+                "wl_nm": {"type": "number"},
+                "pol": {"type": "string"},
+                "h_um": {"type": "number"},
+                "etch_depth_um": {"type": "number"},
+                "w_bus_um": {"type": "number"},
+                "w_tip_um": {"type": "number"},
+                "taper_length_um": {"type": "number"},
+                "taper_profile": {"type": "string", "description": "adiabatic, parabolic, linear"},
+                "fiber_preset": {"type": "string", "description": "SMF28_1550, SMF28_1310, UHNA_3, Lensed_2p5um, DFB_Laser_Butt"},
+                "fiber_angle_deg": {"type": "number"},
+                "apodized": {"type": "boolean"},
+                "focusing": {"type": "boolean"},
+                "box_um": {"type": "number"},
+                "export_gds": {"type": "boolean"},
+                "include_loopback": {"type": "boolean"},
+                "export_interconnect": {"type": "boolean"},
+            },
+        },
+    },
+    {
+        "name": "microring_high_q_fdtd",
+        "description": "Diagnose High-Q FDTD ring-down non-convergence (tau_ph, required 1e-5 shutoff time, truncated FDTD sinc ripples vs exact infinite-roundtrip TMM) and export non-resonant coupler-only 3D-FDTD cutout .gds/.lsf.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "string"},
+                "mat": {"type": "string"},
+                "h_um": {"type": "number"},
+                "w_ring_um": {"type": "number"},
+                "w_bus_um": {"type": "number"},
+                "r_um": {"type": "number"},
+                "gap_um": {"type": "number"},
+                "alpha_loss_db_per_cm": {"type": "number"},
+                "apply_cc": {"type": "boolean"},
+                "export_cutout": {"type": "boolean"},
+            },
+        },
+    },
 ]
 
 _DISPATCH = {
-    "openmrr_status": lambda _args: agent_status(),
-    "openmrr_width_cutoff": agent_width_cutoff,
-    "openmrr_design_mrr": agent_design_mrr,
-    "openmrr_sweep_mrr": agent_sweep_mrr,
-    "openmrr_inspect_gds": agent_inspect_gds,
-    "openmrr_fit_spectrum": agent_fit_spectrum,
-    "openmrr_fab_tolerance": agent_fab_tolerance,
-    "openmrr_active_tuning": agent_active_tuning,
+    "microring_status": lambda _args: agent_status(),
+    "microring_width_cutoff": agent_width_cutoff,
+    "microring_design_mrr": agent_design_mrr,
+    "microring_sweep_mrr": agent_sweep_mrr,
+    "microring_inspect_gds": agent_inspect_gds,
+    "microring_fit_spectrum": agent_fit_spectrum,
+    "microring_fab_tolerance": agent_fab_tolerance,
+    "microring_active_tuning": agent_active_tuning,
+    "microring_io_coupler": agent_io_coupler,
+    "microring_high_q_fdtd": agent_high_q_fdtd,
 }
 
 
@@ -202,7 +252,7 @@ def handle_mcp_request(msg: dict) -> dict | None:
             "result": {
                 "protocolVersion": proto,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "openmrr-studio", "version": __version__},
+                "serverInfo": {"name": "microring-studio", "version": __version__},
             },
         }
 

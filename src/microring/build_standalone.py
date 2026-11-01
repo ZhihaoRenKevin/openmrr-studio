@@ -1,14 +1,14 @@
 """Cross-Platform Consumer Installer Builder (`macOS .dmg` & `Windows Setup .exe` / `.zip`).
 
-Builds native standalone `OpenMRR Studio` desktop installers with zero Python setup
+Builds native standalone `MicroRing Studio` desktop installers with zero Python setup
 and zero GPL dependencies required on end-user machines:
   - macOS Apple Silicon / Intel:
-      python -m openmrr.build_standalone --target macos
-      -> dist/OpenMRR-Studio-v3.4.0-macOS-AppleSilicon.dmg (Drag-to-Applications .dmg)
+      python -m microring.build_standalone --target macos
+      -> dist/MicroRing-Studio-v3.5.0-macOS-AppleSilicon.dmg (Drag-to-Applications .dmg)
   - Windows 10/11 (CPU or CUDA):
-      python -m openmrr.build_standalone --target windows-cpu
-      -> dist/OpenMRR-Studio-v3.4.0-Windows-Setup-x64.exe (Inno Setup Wizard Installer)
-      -> dist/OpenMRR-Studio-v3.4.0-Windows-Portable-x64.zip (Portable unzip-and-run)
+      python -m microring.build_standalone --target windows-cpu
+      -> dist/MicroRing-Studio-v3.5.0-Windows-Setup-x64.exe (Inno Setup Wizard Installer)
+      -> dist/MicroRing-Studio-v3.5.0-Windows-Portable-x64.zip (Portable unzip-and-run)
 """
 from __future__ import annotations
 
@@ -26,17 +26,17 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 try:
-    from openmrr import __version__ as APP_VERSION
+    from microring import __version__ as APP_VERSION
 except Exception:
-    APP_VERSION = "3.4.0"
+    APP_VERSION = "3.5.0"
 
 
 def generate_app_icons(pkg_dir: Path) -> tuple[Path | None, Path | None]:
     """Generate crisp vector-styled microring resonator icons (.icns & .ico) via Pillow."""
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    ico_path = pkg_dir / "openmrr.ico"
-    icns_path = pkg_dir / "openmrr.icns"
-    png_path = pkg_dir / "openmrr_icon_1024.png"
+    ico_path = pkg_dir / "microring.ico"
+    icns_path = pkg_dir / "microring.icns"
+    png_path = pkg_dir / "microring_icon_1024.png"
 
     try:
         from PIL import Image, ImageDraw
@@ -104,7 +104,7 @@ def generate_app_icons(pkg_dir: Path) -> tuple[Path | None, Path | None]:
     img.save(ico_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
     if sys.platform == "darwin" and shutil.which("iconutil"):
-        iconset = pkg_dir / "openmrr.iconset"
+        iconset = pkg_dir / "microring.iconset"
         if iconset.exists():
             shutil.rmtree(iconset)
         iconset.mkdir(parents=True)
@@ -124,7 +124,7 @@ def generate_app_icons(pkg_dir: Path) -> tuple[Path | None, Path | None]:
 
 def _package_macos_dmg(repo_root: Path, app_bundle: Path) -> Path:
     arch = "AppleSilicon" if platform.machine() == "arm64" else "Intel"
-    dmg_name = f"OpenMRR-Studio-v{APP_VERSION}-macOS-{arch}.dmg"
+    dmg_name = f"MicroRing-Studio-v{APP_VERSION}-macOS-{arch}.dmg"
     dmg_path = repo_root / "dist" / dmg_name
     stage_dir = repo_root / "build" / "dmg_stage"
 
@@ -145,17 +145,17 @@ def _package_macos_dmg(repo_root: Path, app_bundle: Path) -> Path:
 
     readme_txt = stage_dir / "HOW_TO_OPEN_ON_MAC.txt"
     readme_txt.write_text(
-        "OpenMRR Studio — macOS Installation (Zero Python Setup Needed)\n"
+        "MicroRing Studio - macOS Installation (Zero Python Setup Needed)\n"
         "==============================================================\n\n"
-        "1. Drag 'OpenMRR Studio.app' into the 'Applications' folder.\n"
+        "1. Drag 'MicroRing Studio.app' into the 'Applications' folder.\n"
         "2. First launch tip (unsigned open-source app on macOS):\n"
-        "   - Right-click (or Control-click) 'OpenMRR Studio.app' in Applications -> click 'Open'.\n"
+        "   - Right-click (or Control-click) 'MicroRing Studio.app' in Applications -> click 'Open'.\n"
         "   - Or if macOS Sequoia/Tahoe blocks an unsigned app, open System Settings ->\n"
         "     Privacy & Security -> scroll down and click 'Open Anyway' once.\n"
         "   - Optional Terminal 1-liner to clear quarantine attribute:\n"
-        "     xattr -dr com.apple.quarantine \"/Applications/OpenMRR Studio.app\"\n\n"
+        "     xattr -dr com.apple.quarantine \"/Applications/MicroRing Studio.app\"\n\n"
         "Exported .GDS masks, .LYP files, and .CSV spectra are saved in:\n"
-        "  ~/Documents/OpenMRR_Studio/\n",
+        "  ~/Documents/MicroRing_Studio/\n",
         encoding="utf-8",
     )
 
@@ -167,7 +167,7 @@ def _package_macos_dmg(repo_root: Path, app_bundle: Path) -> Path:
             "hdiutil",
             "create",
             "-volname",
-            "OpenMRR Studio",
+            "MicroRing Studio",
             "-srcfolder",
             str(stage_dir),
             "-ov",
@@ -178,19 +178,20 @@ def _package_macos_dmg(repo_root: Path, app_bundle: Path) -> Path:
         check=True,
     )
     shutil.rmtree(stage_dir, ignore_errors=True)
-    # Clean duplicate unpacked PyInstaller directory and intermediate build/ folder to save ~600 MB disk space
-    shutil.rmtree(repo_root / "dist" / "OpenMRR Studio", ignore_errors=True)
+    # Clean duplicate unpacked PyInstaller directory, .app staging bundle, and intermediate build/ folder to save ~600 MB disk space
+    shutil.rmtree(repo_root / "dist" / "MicroRing Studio", ignore_errors=True)
+    shutil.rmtree(app_bundle, ignore_errors=True)
     shutil.rmtree(repo_root / "build", ignore_errors=True)
-    print(f"[OpenMRR Builder] Created macOS installer DMG: {dmg_path}")
+    print(f"[MicroRing Builder] Created macOS installer DMG: {dmg_path}")
     return dmg_path
 
 
 def _package_windows_artifacts(repo_root: Path, dist_folder: Path, suffix: str) -> list[Path]:
     created: list[Path] = []
-    zip_base = repo_root / "dist" / f"OpenMRR-Studio-v{APP_VERSION}-Windows-Portable-{suffix}"
+    zip_base = repo_root / "dist" / f"MicroRing-Studio-v{APP_VERSION}-Windows-Portable-{suffix}"
     zip_file = Path(shutil.make_archive(str(zip_base), "zip", root_dir=str(dist_folder.parent), base_dir=dist_folder.name))
     created.append(zip_file)
-    print(f"[OpenMRR Builder] Created portable Windows ZIP: {zip_file}")
+    print(f"[MicroRing Builder] Created portable Windows ZIP: {zip_file}")
 
     iss_file = repo_root / "packaging" / "windows_installer.iss"
     iscc_candidates = [
@@ -200,7 +201,7 @@ def _package_windows_artifacts(repo_root: Path, dist_folder: Path, suffix: str) 
     ]
     iscc = next((p for p in iscc_candidates if p and Path(p).is_file()), None)
     if iscc and iss_file.is_file():
-        setup_base = f"OpenMRR-Studio-v{APP_VERSION}-Windows-Setup-{suffix}"
+        setup_base = f"MicroRing-Studio-v{APP_VERSION}-Windows-Setup-{suffix}"
         rc = subprocess.call([
             iscc,
             f"/DMyAppVersion={APP_VERSION}",
@@ -210,17 +211,17 @@ def _package_windows_artifacts(repo_root: Path, dist_folder: Path, suffix: str) 
         exe_out = repo_root / "dist" / f"{setup_base}.exe"
         if rc == 0 and exe_out.is_file():
             created.append(exe_out)
-            print(f"[OpenMRR Builder] Created Windows Setup Installer EXE: {exe_out}")
+            print(f"[MicroRing Builder] Created Windows Setup Installer EXE: {exe_out}")
     return created
 
 
 def build_package(target: str) -> int:
     repo_root = Path(__file__).resolve().parents[2]
-    entry = repo_root / "src" / "openmrr" / "desktop_app.py"
+    entry = repo_root / "src" / "microring" / "desktop_app.py"
     pkg_dir = repo_root / "packaging"
     icns_path, ico_path = generate_app_icons(pkg_dir)
 
-    app_name = "OpenMRR Studio"
+    app_name = "MicroRing Studio"
     cmd = [
         sys.executable,
         "-m",
@@ -235,6 +236,7 @@ def build_package(target: str) -> int:
         "--paths",
         str(repo_root / "src"),
         "--hidden-import=scipy.sparse.linalg._eigen.arpack",
+        "--hidden-import=scipy.sparse.linalg._dsolve.linsolve",
         "--hidden-import=scipy.special._cdflib",
         "--hidden-import=scipy.spatial._qhull",
         "--hidden-import=skfem",
@@ -244,13 +246,13 @@ def build_package(target: str) -> int:
         "--hidden-import=uvicorn",
         "--hidden-import=starlette",
         "--hidden-import=anyio._backends._asyncio",
-        "--collect-submodules=openmrr",
+        "--collect-submodules=microring",
         "--collect-submodules=skfem",
         "--collect-submodules=uvicorn",
     ]
 
     if target == "macos":
-        cmd.extend(["--osx-bundle-identifier", "org.openmrr.studio"])
+        cmd.extend(["--osx-bundle-identifier", "org.microring.studio"])
         if icns_path:
             cmd.extend(["--icon", str(icns_path)])
     else:
@@ -353,7 +355,7 @@ def build_package(target: str) -> int:
             int_shim.chmod(0o755)
             env["PATH"] = f"{shim_dir}:{env.get('PATH', '')}"
 
-    print("[OpenMRR Builder] Running PyInstaller:", " ".join(cmd))
+    print("[MicroRing Builder] Running PyInstaller:", " ".join(cmd))
     rc = subprocess.call(cmd, cwd=str(repo_root), env=env)
     if rc != 0:
         return rc
@@ -362,19 +364,19 @@ def build_package(target: str) -> int:
     if target == "macos":
         app_bundle = repo_root / "dist" / f"{app_name}.app"
         bin_path = app_bundle / "Contents" / "MacOS" / app_name
-        print(f"[OpenMRR Builder] Smoke-testing compiled macOS binary: {bin_path}")
+        print(f"[MicroRing Builder] Smoke-testing compiled macOS binary: {bin_path}")
         chk = subprocess.call([str(bin_path), "--headless-check"])
         if chk != 0:
-            print("[OpenMRR Builder] ERROR: Compiled macOS app failed --headless-check!")
+            print("[MicroRing Builder] ERROR: Compiled macOS app failed --headless-check!")
             return chk
         _package_macos_dmg(repo_root, app_bundle)
     else:
         dist_folder = repo_root / "dist" / app_name
         bin_path = dist_folder / f"{app_name}.exe"
-        print(f"[OpenMRR Builder] Smoke-testing compiled Windows binary: {bin_path}")
+        print(f"[MicroRing Builder] Smoke-testing compiled Windows binary: {bin_path}")
         chk = subprocess.call([str(bin_path), "--headless-check"])
         if chk != 0:
-            print("[OpenMRR Builder] ERROR: Compiled Windows .exe failed --headless-check!")
+            print("[MicroRing Builder] ERROR: Compiled Windows .exe failed --headless-check!")
             return chk
         suffix = "x64-CUDA" if target == "windows-cuda" else "x64"
         _package_windows_artifacts(repo_root, dist_folder, suffix)
@@ -383,7 +385,7 @@ def build_package(target: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build consumer .dmg / .exe installers for OpenMRR Studio")
+    parser = argparse.ArgumentParser(description="Build consumer .dmg / .exe installers for MicroRing Studio")
     parser.add_argument("--target", choices=["macos", "windows-cpu", "windows-cuda"], required=True)
     args = parser.parse_args()
     raise SystemExit(build_package(args.target))

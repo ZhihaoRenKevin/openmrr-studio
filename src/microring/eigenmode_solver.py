@@ -1,4 +1,4 @@
-"""Dual-Engine Full-Vector Waveguide & Bent-MRR Eigenmode Solver (`openmrr.eigenmode_solver`).
+"""Dual-Engine Full-Vector Waveguide & Bent-MRR Eigenmode Solver (`microring.eigenmode_solver`).
 
 Provides two independent, cross-checkable open-source Maxwell eigenmode backends:
   1. `fem` (100% Pure-BSD `conformal_mesher` + `scikit-fem`, zero GPL dependencies):

@@ -19,8 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import fit_multi_resonance_spectrum, fit_single_resonance_cmt, tmm_broadband_mrr_spectrum
-from openmrr.mrr_cmt_fit_predict import cmt_split_doublet_power
+from microring import fit_multi_resonance_spectrum, fit_single_resonance_cmt, tmm_broadband_mrr_spectrum
+from microring.mrr_cmt_fit_predict import cmt_split_doublet_power
 
 
 def main() -> None:

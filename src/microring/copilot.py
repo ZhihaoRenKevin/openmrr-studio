@@ -1,4 +1,4 @@
-"""Guided Step-by-Step Conversational Photonics Copilot (`openmrr.copilot`).
+"""Guided Step-by-Step Conversational Photonics Copilot (`microring.copilot`).
 
 Bilingual (`English` & `简体中文`) conversational assistant that guides users step-by-step
 (one clear question at a time, or instant fast-forward when multiple specs are given):
@@ -33,11 +33,19 @@ from .gds_bridge import (
     export_sweep_array_gds,
     write_klayout_layer_props,
 )
+from .io_couplers import (
+    design_butt_edge_coupler,
+    design_grating_coupler,
+    export_io_coupler_gds,
+    export_io_coupler_interconnect,
+)
 from .materials import C0_M_PER_S, MATERIAL_CATALOG
 from .mrr_cmt_fit_predict import loss_db_per_cm_to_q_int, q_int_to_loss_db_per_cm
 from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
+    analyze_high_q_fdtd_convergence,
+    export_coupler_cutout_gds,
     export_mrr_gds,
     simulate_mrr_topology,
 )
@@ -329,10 +337,10 @@ def create_initial_session(lang: str = "en") -> dict:
     zh = str(lang).lower().startswith("zh")
     cfg = asdict(MRRDesignConfig())
     welcome = (
-        "👋 **欢迎使用 OpenMRR Studio 微环光子设计助手！**\n\n"
+        "👋 **欢迎使用 MicroRing Studio 微环光子设计助手！**\n\n"
         "请选择下方工作流，我将以**一问一答**方式逐步引导您完成微环设计（您也可以直接输入完整参数）："
         if zh
-        else "👋 **Welcome to OpenMRR Studio!**\n\n"
+        else "👋 **Welcome to MicroRing Studio!**\n\n"
         "How would you like to get started? Pick a workflow below and I will guide you **step by step** "
         "(one question at a time), or type your full spec directly:"
     )
@@ -356,19 +364,21 @@ def get_welcome_chips(lang: str = "en") -> list[dict[str, str]]:
     if str(lang).lower().startswith("zh"):
         return [
             {"label": "✨ 开始逐步引导设计新微环", "prompt": "开始逐步设计微环"},
+            {"label": "🔌 设计光栅耦合器 (GC) / 端面耦合器 (Butt)", "prompt": "设计 220 nm SOI 聚焦光栅耦合器 @ 1550 nm"},
+            {"label": "🚀 超高 Q (Q > 10^6) 秒级收敛 vs FDTD 振铃诊断", "prompt": "分析超高 Q 氮化硅微环 FDTD 不收敛与振铃光谱"},
             {"label": "📈 从实测光谱提取损耗 (dB/cm) 与 Q 值", "prompt": "从实测光谱提取波导损耗"},
             {"label": "📐 上传已有 .GDS 版图提取并仿真", "prompt": "上传 GDS 版图", "ui_action": "open_gds_picker"},
             {"label": "⚡ 快速体验：400nm 氮化硅 @ 1550nm", "prompt": "400 nm Si3N4 条形波导, SiO2包层, TE0 @ 1550 nm"},
             {"label": "⚡ 快速体验：220nm SOI @ 1310nm", "prompt": "220 nm SOI 条形波导, SiO2包层, TE0 @ 1310 nm"},
-            {"label": "⚡ 快速体验：中红外 4.2µm 锗波导", "prompt": "1400 nm Ge 300 nm slab on CaF2, 空气包层, TE0 @ 4200 nm"},
         ]
     return [
         {"label": "✨ Start Step-by-Step Ring Design", "prompt": "Start step-by-step microring design"},
+        {"label": "🔌 Butt Coupler & 2D-FDFD Grating Coupler", "prompt": "Design a 220 nm SOI apodized focusing grating coupler at 1550 nm"},
+        {"label": "🚀 High-Q (10^6+) Convergence vs Slow FDTD", "prompt": "Analyze High-Q Si3N4 microring FDTD non-convergence and ring-down"},
         {"label": "📈 Extract Loss (dB/cm) & Q from Spectrum", "prompt": "Extract waveguide loss from measured spectrum"},
         {"label": "📐 Upload & Analyze .GDS Layout", "prompt": "Upload GDS layout", "ui_action": "open_gds_picker"},
         {"label": "⚡ Quick Try: 400nm Si3N4 @ 1550nm", "prompt": "400 nm Si3N4 strip waveguide, SiO2 clad, TE0 at 1550 nm"},
         {"label": "⚡ Quick Try: 220nm SOI @ 1310nm", "prompt": "220 nm SOI strip, SiO2 clad, TE0 at 1310 nm"},
-        {"label": "⚡ Quick Try: Mid-IR Ge @ 4.2 µm", "prompt": "1400 nm Ge with 300 nm slab on CaF2, air clad, TE0 at 4200 nm"},
     ]
 
 
@@ -778,7 +788,64 @@ def parse_photonics_intent(message: str) -> dict:
         out["targets"]["ports"] = 4 if is_ad else 2
 
     # 10. Direct Action Triggers
-    if re.search(r"critical[-_\s]*coupl|apply\s+cc|临界耦合", low):
+    if re.search(
+        r"butt[-_\s]*coupl|edge[-_\s]*coupl|spot[-_\s]*size[-_\s]*convert|inverse[-_\s]*taper|lensed[-_\s]*fiber|"
+        r"dfb[-_\s]*laser|grating[-_\s]*coupl|\bgc\s*(?:design|coupl|gds|loop|interconnect)|focusing[-_\s]*grating|"
+        r"apodized[-_\s]*grating|fiber[-_\s]*array[-_\s]*loop|端面耦合|边缘耦合|模斑转换|倒锥|光栅耦合|聚焦光栅|光纤阵列回环",
+        low,
+    ):
+        is_butt = bool(
+            re.search(
+                r"butt[-_\s]*coupl|edge[-_\s]*coupl|spot[-_\s]*size|inverse[-_\s]*taper|lensed[-_\s]*fiber|dfb[-_\s]*laser|端面耦合|边缘耦合|模斑转换|倒锥",
+                low,
+            )
+            and not re.search(r"grating|光栅", low)
+        )
+        fib_p = "Lensed_2p5um" if is_butt else "SMF28_1550"
+        if re.search(r"dfb|laser|激光器", low):
+            fib_p = "DFB_Laser_Butt"
+        elif re.search(r"uhna", low):
+            fib_p = "UHNA_3"
+        elif re.search(r"4(?:\.0)?\s*(?:um|µm)\s*lensed", low):
+            fib_p = "Lensed_4p0um"
+        elif re.search(r"2\.5\s*(?:um|µm)|lensed|透镜光纤", low) and is_butt:
+            fib_p = "Lensed_2p5um"
+        elif re.search(r"smf[-_\s]*28|10\.4\s*(?:um|µm)|标准单模光纤", low):
+            fib_p = "SMF28_1550"
+
+        etch_m = re.search(r"etch[-_\s]*(?:depth)?\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
+        tip_m = re.search(r"(?:w_?tip|tip[-_\s]*width|尖端宽)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(nm|um|µm)", low)
+        f_ang_m = re.search(r"(?:fiber[-_\s]*angle|tilt|光纤倾角|入射角)\s*[=:]?\s*(\d+(?:\.\d+)?)", low)
+        out["action"] = "io_coupler"
+        out["io"] = {
+            "coupler_type": "butt_edge" if is_butt else "grating_coupler",
+            "fiber_preset": fib_p,
+            "apodized": not bool(re.search(r"\buniform\b|均匀光栅", low)),
+            "focusing": not bool(re.search(r"\blinear\s+grating\b|直齿光栅", low)),
+            "etch_depth_um": _to_um(float(etch_m.group(1)), etch_m.group(2)) if etch_m else None,
+            "w_tip_um": _to_um(float(tip_m.group(1)), tip_m.group(2)) if tip_m else None,
+            "fiber_angle_deg": float(f_ang_m.group(1)) if f_ang_m else 10.0,
+            "export_gds": bool(re.search(r"\bgds\b|layout|mask|loopback|版图|回环", low)),
+            "include_loopback": bool(re.search(r"loopback|fiber[-_\s]*array|127|回环|测试环", low)),
+            "export_interconnect": bool(re.search(r"interconnect|spar|compact[-_\s]*model", low)),
+        }
+    elif re.search(
+        r"high[-_\s]*q|ultra[-_\s]*high[-_\s]*q|ring[-_\s]*down|auto[-_\s]*shutoff|shutoff|"
+        r"(?:fdtd|lumerical|mode).*(?:slow|converg)|(?:slow|not\s+converg|cannot\s+converg|non[-_\s]*converg).*(?:fdtd|mrr|ring|q\b)|"
+        r"coupler[-_\s]*cutout|高\s*q|超高\s*q|不收敛|收敛慢|fdtd.*慢|振铃|耦合区切片",
+        low,
+    ):
+        tsim_m = re.search(r"(\d+(?:\.\d+)?)\s*(ps|ns)\b", low)
+        tsim_ps = 50.0
+        if tsim_m:
+            tsim_ps = float(tsim_m.group(1)) * (1000.0 if tsim_m.group(2) == "ns" else 1.0)
+        out["action"] = "high_q_fdtd"
+        out["high_q"] = {
+            "fdtd_sim_time_ps": tsim_ps,
+            "export_cutout_gds": bool(re.search(r"cutout|\bgds\b|lsf|切片|导出", low)),
+            "ultra_low_loss": bool(re.search(r"ultra|10\^?6|10\^?7|million|超高", low)),
+        }
+    elif re.search(r"critical[-_\s]*coupl|apply\s+cc|临界耦合", low):
         out["action"] = "apply_critical_coupling"
     elif re.search(r"(?:sweep|array).*gds|gds.*(?:sweep|array)|阵列.*(?:gds|版图)", low):
         out["action"] = "export_sweep_gds"
@@ -1674,7 +1741,7 @@ def _process_chat_turn_core(
         out_dir = Path(gds_export_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         if intent["action"] == "export_single_gds":
-            fname = f"OpenMRR_{cfg.topology}_{cfg.core_material}_R{int(cfg.ring_radius_um)}um.gds"
+            fname = f"MicroRing_{cfg.topology}_{cfg.core_material}_R{int(cfg.ring_radius_um)}um.gds"
             gds_path = export_mrr_gds(cfg, out_dir / fname)
             lyp_path = write_klayout_layer_props(Path(gds_path).with_suffix(".lyp"))
             gds_view = analyze_uploaded_gds(gds_path)
@@ -1696,7 +1763,7 @@ def _process_chat_turn_core(
                 vals = [round(max(0.10, center + d), 3) for d in (-0.04, -0.02, 0.0, 0.02, 0.04)]
             else:
                 vals = [round(max(2.0, center * f), 2) for f in (0.7, 0.85, 1.0, 1.15, 1.30)]
-            fname = f"OpenMRR_SweepArray_{cfg.core_material}_{p_name}.gds"
+            fname = f"MicroRing_SweepArray_{cfg.core_material}_{p_name}.gds"
             gds_path = export_sweep_array_gds(cfg, p_name, vals, out_dir / fname)
             lyp_path = str(Path(gds_path).with_suffix(".lyp"))
             gds_view = analyze_uploaded_gds(gds_path)
@@ -1739,7 +1806,7 @@ def _process_chat_turn_core(
     if intent["action"] == "export_fab_bias_gds":
         out_dir = Path(gds_export_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"OpenMRR_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
+        fname = f"MicroRing_OPC_DoseBracket_{cfg.core_material}_{cfg.topology}.gds"
         bias_info = export_fab_bias_array_gds(cfg, out_dir / fname)
         gds_path = bias_info["gds_path"]
         lyp_path = bias_info["lyp_path"]
@@ -1971,6 +2038,230 @@ def _process_chat_turn_core(
         return ret_payload
 
     # ------------------------------------------------------------------
+    # Direct Action 2D: License-Free Butt / Edge Coupler & 2D-FDFD Grating Coupler
+    # ------------------------------------------------------------------
+    if intent["action"] == "io_coupler":
+        io_opts = intent.get("io") or {}
+        ctype = str(io_opts.get("coupler_type") or "grating_coupler")
+        fib_preset = str(io_opts.get("fiber_preset") or ("Lensed_2p5um" if ctype == "butt_edge" else "SMF28_1550"))
+        if ctype == "butt_edge":
+            io_res = design_butt_edge_coupler(
+                core_material=cfg.core_material,
+                clad_material=cfg.clad_material,
+                top_clad_material=cfg.top_clad_material,
+                wavelength_nm=cfg.wavelength_nm,
+                polarization=cfg.polarization,
+                film_height_um=cfg.film_height_um,
+                slab_height_um=cfg.slab_height_um,
+                sidewall_deg=cfg.sidewall_deg,
+                w_bus_um=cfg.bus_width_um,
+                w_tip_um=io_opts.get("w_tip_um"),
+                fiber_preset=fib_preset,
+            )
+            mt = io_res["metrics"]
+            if zh:
+                msg = (
+                    f"🔌 **已完成纯自研二维矢量有限元端面耦合器 (`Butt / Edge Coupler`) 设计（零商业软件依赖）**\n"
+                    f"- **对接光纤 / 激光器**：`{io_res['fiber_label']}`（`{cfg.core_material}`，`H = {cfg.film_height_um*1000:.0f} nm`，`{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`）\n"
+                    f"- **最优倒锥尖端宽度 (`W_tip`)**：**`{io_res['w_tip_um']*1000:.0f} nm`** → **总插入损耗 `IL = {mt['total_il_db']:.2f} dB`**（耦合效率 **`{mt['total_efficiency_pct']:.1f}%`**，回波损耗 `{mt['return_loss_db']:.1f} dB`）\n"
+                    f"- **光模块封装对准容差**：**`1-dB = (±{mt['tol_1db_x_um']:.2f}, ±{mt['tol_1db_y_um']:.2f}) µm`**｜`3-dB = (±{mt['tol_3db_x_um']:.2f}, ±{mt['tol_3db_y_um']:.2f}) µm`\n"
+                    f"- **推荐绝热锥长**：`L_taper ≥ {io_res['recommended_taper_length_um']:.0f} µm`"
+                )
+            else:
+                msg = (
+                    f"🔌 **Solved 2D Vector FEM Butt / Edge Coupler (`Zero Commercial Licenses`)**\n"
+                    f"- **Target Fiber / Laser**: `{io_res['fiber_label']}` (`{cfg.core_material}`, `H = {cfg.film_height_um*1000:.0f} nm`, `{cfg.polarization}` @ `{cfg.wavelength_nm:g} nm`)\n"
+                    f"- **Optimal Tip Width (`W_tip`)**: **`{io_res['w_tip_um']*1000:.0f} nm`** -> **Total `IL = {mt['total_il_db']:.2f} dB`** (**`{mt['total_efficiency_pct']:.1f}%`**, Return Loss `{mt['return_loss_db']:.1f} dB`)\n"
+                    f"- **Optical-Module Alignment Tolerance**: **`1-dB = (±{mt['tol_1db_x_um']:.2f}, ±{mt['tol_1db_y_um']:.2f}) µm`** | `3-dB = (±{mt['tol_3db_x_um']:.2f}, ±{mt['tol_3db_y_um']:.2f}) µm`\n"
+                    f"- **Recommended Adiabatic Taper Length**: `L_taper ≥ {io_res['recommended_taper_length_um']:.0f} µm`"
+                )
+        else:
+            io_res = design_grating_coupler(
+                core_material=cfg.core_material,
+                clad_material=cfg.clad_material,
+                top_clad_material=cfg.top_clad_material,
+                wavelength_nm=cfg.wavelength_nm,
+                polarization=cfg.polarization,
+                film_height_um=cfg.film_height_um,
+                etch_depth_um=io_opts.get("etch_depth_um"),
+                fiber_angle_deg=float(io_opts.get("fiber_angle_deg") or 10.0),
+                apodized=bool(io_opts.get("apodized", True)),
+                focusing=bool(io_opts.get("focusing", True)),
+                w_bus_um=cfg.bus_width_um,
+                fiber_preset=fib_preset,
+            )
+            mt = io_res["metrics"]
+            sy = io_res["synthesis"]
+            if zh:
+                msg = (
+                    f"🔌 **已完成全波二维频域有限差分 (`2D Full-Wave Maxwell FDFD`) 光栅耦合器仿真（零 Lumerical / RSoft 依赖）**\n"
+                    f"- **结构参数**：`{cfg.core_material}`（膜厚 `{io_res['film_height_um']*1000:.0f} nm`，浅刻蚀 `{io_res['etch_depth_um']*1000:.0f} nm`，平均周期 **`Λ = {sy['pitch_mean_um']*1000:.1f} nm`**，占空比 `{sy['ff_start']:.2f}→{sy['ff_end']:.2f}`）\n"
+                    f"- **峰值耦合损耗与带宽**：**`IL = {mt['peak_il_db']:.2f} dB`**（效率 **`{mt['peak_efficiency_pct']:.1f}%`** @ `{mt['peak_wavelength_nm']:.1f} nm`）｜**`1-dB / 3-dB BW = {mt['bw_1db_nm']:.1f} / {mt['bw_3db_nm']:.1f} nm`**\n"
+                    f"- **方向性与回波反射**：向上辐射 `{mt['upward_directionality_pct']:.1f}%`，基底泄漏 `{mt['substrate_loss_pct']:.1f}%`，波导反射 **`S11 = {mt['s11_db']:.1f} dB`**"
+                )
+            else:
+                msg = (
+                    f"🔌 **Solved Native 2D Full-Wave Maxwell `FDFD` Grating Coupler (`Zero Lumerical / RSoft`)**\n"
+                    f"- **Synthesized Teeth**: `{cfg.core_material}` (`H = {io_res['film_height_um']*1000:.0f} nm`, Etch `{io_res['etch_depth_um']*1000:.0f} nm`, Mean Pitch **`Λ = {sy['pitch_mean_um']*1000:.1f} nm`**, Fill `{sy['ff_start']:.2f} -> {sy['ff_end']:.2f}`)\n"
+                    f"- **Peak Insertion Loss & Bandwidth**: **`IL = {mt['peak_il_db']:.2f} dB`** (**`{mt['peak_efficiency_pct']:.1f}%`** @ `{mt['peak_wavelength_nm']:.1f} nm`) | **`1-dB / 3-dB BW = {mt['bw_1db_nm']:.1f} / {mt['bw_3db_nm']:.1f} nm`**\n"
+                    f"- **Directionality & Reflection**: Upward `{mt['upward_directionality_pct']:.1f}%`, Substrate `{mt['substrate_loss_pct']:.1f}%`, Back-Reflection **`S11 = {mt['s11_db']:.1f} dB`**"
+                )
+
+        gds_exp = None
+        if io_opts.get("export_gds"):
+            out_dir = Path(gds_export_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            loop_flag = bool(io_opts.get("include_loopback"))
+            g_name = f"MicroRing_IO_{ctype}_{cfg.core_material}{'_Loopback' if loop_flag else ''}.gds"
+            gds_info = export_io_coupler_gds(
+                io_res, out_dir / g_name, ring_config=cfg if loop_flag else None, include_ring_loopback=loop_flag
+            )
+            gds_exp = {
+                "gds_path": gds_info["gds_path"],
+                "lyp_path": gds_info["lyp_path"],
+                "gds_view": analyze_uploaded_gds(gds_info["gds_path"]),
+            }
+            msg += (
+                f"\n- 💾 **已导出 GDSII 版图**：`{Path(gds_info['gds_path']).name}`"
+                if zh
+                else f"\n- 💾 **Exported GDSII Mask**: `{Path(gds_info['gds_path']).name}`"
+            )
+
+        ic_io = None
+        if io_opts.get("export_interconnect"):
+            out_dir = Path(gds_export_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ic_io = export_io_coupler_interconnect(io_res, out_dir / f"io_interconnect_{ctype}_{cfg.core_material}")
+            ic_io["zip_download_url"] = f"/api/download_file?name={ic_io['zip_name']}"
+            msg += (
+                f"\n- 📦 **已导出 Lumerical INTERCONNECT 端口 S 参数包**：`{ic_io['zip_name']}`"
+                if zh
+                else f"\n- 📦 **Exported Lumerical INTERCONNECT 2-Port `SPAR`**: `{ic_io['zip_name']}`"
+            )
+
+        session["last_io_result"] = io_res
+        session["wizard_step"] = 6
+        session["ui_view"] = "io"
+        chips = (
+            [
+                {"label": "🔌 切换为端面耦合器 (Butt -> 2.5µm 透镜光纤)", "prompt": "设计端面耦合器对接 2.5 um 透镜光纤"}
+                if ctype != "butt_edge"
+                else {"label": "🔌 切换为切趾聚焦光栅耦合器 (2D-FDFD)", "prompt": "设计切趾聚焦光栅耦合器"},
+                {"label": "🔬 端面直耦 III-V DFB 激光器 (2.4×1.2 µm)", "prompt": "设计端面耦合器对接 DFB 激光器"},
+                {"label": "💾 导出 127µm 光纤阵列 + 微环回环测试 .GDS", "prompt": f"导出 {'端面耦合器' if ctype == 'butt_edge' else '聚焦光栅耦合器'} 127um 光纤阵列回环 GDS"},
+                {"label": "📦 导出耦合器 INTERCONNECT S 参数包", "prompt": f"导出 {'端面耦合器' if ctype == 'butt_edge' else '光栅耦合器'} INTERCONNECT S 参数"},
+            ]
+            if zh
+            else [
+                {"label": "🔌 Switch to Butt Coupler (2.5 µm Lensed Fiber)", "prompt": "Design butt coupler to 2.5 um lensed fiber"}
+                if ctype != "butt_edge"
+                else {"label": "🔌 Switch to Apodized Focusing GC (2D-FDFD)", "prompt": "Design apodized focusing grating coupler"},
+                {"label": "🔬 Butt-Couple III-V DFB Laser (2.4×1.2 µm)", "prompt": "Design butt coupler to DFB laser diode"},
+                {"label": "💾 Export 127 µm FA + Ring Loopback .GDS", "prompt": f"Export {'butt coupler' if ctype == 'butt_edge' else 'focusing grating coupler'} 127um fiber array loopback GDS"},
+                {"label": "📦 Export Coupler INTERCONNECT SPAR", "prompt": f"Export {'butt coupler' if ctype == 'butt_edge' else 'grating coupler'} INTERCONNECT compact model"},
+            ]
+        )
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        ret_io = {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "io_result": io_res,
+            "ui_view": "io",
+            "wizard_step": 6,
+            "active_tab": "tab-io",
+        }
+        if gds_exp is not None:
+            ret_io["gds_export"] = gds_exp
+        if ic_io is not None:
+            ret_io["interconnect_export"] = ic_io
+        return ret_io
+
+    # ------------------------------------------------------------------
+    # Direct Action 2E: Ultra-High-Q Convergence vs Slow Lumerical FDTD Ring-Down
+    # ------------------------------------------------------------------
+    if intent["action"] == "high_q_fdtd":
+        hq_opts = intent.get("high_q") or {}
+        cfg_hq = cfg
+        if hq_opts.get("ultra_low_loss") and (cfg_hq.alpha_loss_db_per_cm is None or cfg_hq.alpha_loss_db_per_cm > 0.15):
+            cfg_hq = replace(cfg_hq, alpha_loss_db_per_cm=0.08, gap_thru_um=max(cfg_hq.gap_thru_um, 0.36))
+            cfg_dict["alpha_loss_db_per_cm"] = 0.08
+            cfg_dict["gap_thru_um"] = cfg_hq.gap_thru_um
+            session["config"] = cfg_dict
+
+        tsim_ps = float(hq_opts.get("fdtd_sim_time_ps") or 50.0)
+        hq_res = analyze_high_q_fdtd_convergence(
+            cfg_hq,
+            sim_times_ps=[10.0, tsim_ps, 250.0, 1000.0] if tsim_ps not in (10.0, 250.0, 1000.0) else [10.0, 50.0, 250.0, 1000.0],
+        )
+        traces = hq_res["truncated_fdtd_traces"]
+        sel_tr = next(
+            (r for r in traces if abs(r["fdtd_sim_time_ps"] - tsim_ps) < 1e-3),
+            traces[1],
+        )
+        cut_exp = None
+        if hq_opts.get("export_cutout_gds"):
+            out_dir = Path(gds_export_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            cut_exp = export_coupler_cutout_gds(
+                cfg_hq, out_dir / f"MicroRing_CouplerCutout_{cfg_hq.topology}_{cfg_hq.core_material}.gds"
+            )
+
+        if zh:
+            msg = (
+                f"🚀 **已完成超高 Q 微环谐振腔精确收敛 vs Lumerical 3D-FDTD 截断振铃诊断**\n"
+                f"- **精确稳态解 ($M \\to \\infty$)**：**`Q_loaded = {hq_res['Q_loaded']:,.0f}`**（线宽 `FWHM = {hq_res['FWHM_pm']:.3f} pm`，光子寿命 `τ_ph = {hq_res['photon_lifetime_ps']:.1f} ps`，真实消光比 **`ER = {hq_res['true_converged_er_db']:.2f} dB`**）\n"
+                f"- **为何 3D-FDTD 无法收敛**：达到 `1e-5` 能量关断阈值需要仿真时间 **`{hq_res['required_fdtd_sim_time_1e5_ns']:.2f} ns`**（足足 **`{hq_res['required_fdtd_roundtrips_1e5']:,.0f}` 圈**往返！）；若在 `{sel_tr['fdtd_sim_time_ps']:.0f} ps` 截断，剩余能量高达 `{sel_tr['residual_energy_shutoff']:.3f}`，表观消光比坍塌至 **`{sel_tr['apparent_er_db']:.2f} dB`**（误差 `{sel_tr['er_error_db']:.1f} dB`！）\n"
+                f"- **混合加速方案**：仅对耦合区导出单程切片（仅需 **`{hq_res['coupler_only_fdtd_time_ps']} ps`**，提速 **`{hq_res['time_domain_speedup_factor']:,.0f}×`**），再由 MicroRing Studio 解析闭合无限圈谐振！"
+            )
+            chips = [
+                {"label": "✂️ 导出单程耦合区 FDTD 切片 (.GDS + .lsf)", "prompt": "导出高Q微环耦合区切片 GDS 与 lsf"},
+                {"label": "⏱️ 查看 t_sim = 500 ps 截断光谱对比", "prompt": "分析高Q微环 500 ps FDTD 截断光谱"},
+                {"label": "⚡ 一键应用临界耦合再测高Q收敛", "prompt": "临界耦合"},
+                {"label": "📊 返回微环透射光谱面板", "prompt": "开始仿真"},
+            ]
+        else:
+            msg = (
+                f"🚀 **Solved High-Q Infinite-Roundtrip Convergence vs Truncated 3D-FDTD Ring-Down**\n"
+                f"- **Exact $M \\to \\infty$ Steady State**: **`Q_loaded = {hq_res['Q_loaded']:,.0f}`** (`FWHM = {hq_res['FWHM_pm']:.3f} pm`, `τ_ph = {hq_res['photon_lifetime_ps']:.1f} ps`, True Converged **`ER = {hq_res['true_converged_er_db']:.2f} dB`**)\n"
+                f"- **Why 3D-FDTD Stalls**: Reaching `1e-5` auto-shutoff requires **`{hq_res['required_fdtd_sim_time_1e5_ns']:.2f} ns`** (**`{hq_res['required_fdtd_roundtrips_1e5']:,.0f}` round-trips**!). Stopping FDTD at `{sel_tr['fdtd_sim_time_ps']:.0f} ps` leaves `shutoff = {sel_tr['residual_energy_shutoff']:.3f}` and collapses apparent `ER` to **`{sel_tr['apparent_er_db']:.2f} dB`** (`{sel_tr['er_error_db']:.1f} dB` error + sinc ringing!)\n"
+                f"- **Hybrid Speedup**: Export our non-resonant Coupler-Only Cutout (`{hq_res['coupler_only_fdtd_time_ps']} ps` single pass, **`{hq_res['time_domain_speedup_factor']:,.0f}×` faster**) + let MicroRing Studio close the infinite ring analytically!"
+            )
+            chips = [
+                {"label": "✂️ Export Coupler Cutout (.GDS + .lsf)", "prompt": "Export high-Q coupler cutout GDS and lsf"},
+                {"label": "⏱️ Compare Truncated FDTD @ 500 ps", "prompt": "Analyze high-Q FDTD convergence at 500 ps"},
+                {"label": "⚡ Apply Critical Coupling First", "prompt": "Apply critical coupling"},
+                {"label": "📊 Back to MRR Spectrum", "prompt": "Simulate current MRR"},
+            ]
+        if cut_exp is not None:
+            msg += (
+                f"\n- ✂️ **已生成单程耦合区切片**：`{Path(cut_exp['gds_path']).name}` + `{Path(cut_exp['lsf_path']).name}`（建议 FDTD 时间 `{cut_exp['recommended_fdtd_time_ps']} ps`，提速 `{hq_res['time_domain_speedup_factor']:,.0f}×`）"
+                if zh
+                else f"\n- ✂️ **Exported Coupler-Only Cutout**: `{Path(cut_exp['gds_path']).name}` + `{Path(cut_exp['lsf_path']).name}` (`t_sim = {cut_exp['recommended_fdtd_time_ps']} ps`, `{hq_res['time_domain_speedup_factor']:,.0f}×` faster)"
+            )
+
+        session["last_high_q_result"] = hq_res
+        session["wizard_step"] = 6
+        session["ui_view"] = "io"
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        ret_hq = {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "high_q_result": hq_res,
+            "ui_view": "io",
+            "wizard_step": 6,
+            "active_tab": "tab-io",
+        }
+        if cut_exp is not None:
+            ret_hq["gds_export"] = {
+                "gds_path": cut_exp["gds_path"],
+                "lyp_path": cut_exp["lyp_path"],
+                "gds_view": analyze_uploaded_gds(cut_exp["gds_path"]),
+            }
+        return ret_hq
+
+    # ------------------------------------------------------------------
     # Guided Step 3 -> Step 4 Pre-Check: Material chosen, ask to confirm Wafer Stack
     # ------------------------------------------------------------------
     if (
@@ -1987,6 +2278,8 @@ def _process_chat_turn_core(
             "export_fab_bias_gds",
             "active_tuning",
             "export_interconnect",
+            "io_coupler",
+            "high_q_fdtd",
         )
         and "uploaded_gds" not in confirmed
     ):
@@ -2350,22 +2643,22 @@ def _process_chat_turn_core(
     chips = (
         [
             {"label": f"⚡ 一键应用临界耦合 ({cc['recommended_value']} {cc['unit']})", "prompt": "临界耦合"},
+            {"label": "🔌 光栅耦合器 (GC) / 端面耦合器 (Butt)", "prompt": "设计切趾聚焦光栅耦合器"},
+            {"label": "🚀 高Q收敛 vs FDTD 振铃诊断", "prompt": "分析高Q微环 FDTD 收敛与振铃"},
             {"label": "🎛️ 有源调谐光谱 (V / I / ΔT / E) + INTERCONNECT", "prompt": "计算有源调谐效率与不同电压电流光谱"},
             {"label": "🧪 正/负胶过曝与欠曝容差分析", "prompt": "正胶 ±15% 过曝与欠曝工艺误差分析"},
             {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
             {"label": "🗂️ 导出 5 环扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
-            {"label": "📏 扫描耦合间距 Gap", "prompt": "扫描间距"},
-            {"label": "📉 扫描传播损耗 (dB/cm)", "prompt": "扫描损耗"},
         ]
         if zh
         else [
             {"label": f"⚡ Apply Critical Coupling ({cc['recommended_value']} {cc['unit']})", "prompt": "Apply critical coupling"},
+            {"label": "🔌 Butt Coupler & 2D-FDFD Grating Coupler", "prompt": "Design apodized focusing grating coupler"},
+            {"label": "🚀 High-Q Convergence vs FDTD Ring-Down", "prompt": "Analyze high-Q FDTD convergence and ring-down"},
             {"label": "🎛️ Active Tuning (V / I / ΔT / E) + INTERCONNECT", "prompt": "Calculate tuning efficiency and multi-bias spectra"},
             {"label": "🧪 Fab Error (Over/Under-Dose PR)", "prompt": "Analyze positive PR ±15% over-dose and under-dose"},
             {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
             {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},
-            {"label": "📏 Sweep Coupler Gap", "prompt": "Sweep gap"},
-            {"label": "📉 Sweep Loss (dB/cm)", "prompt": "Sweep propagation loss"},
         ]
     )
     session["history"] = (history + [{"role": "assistant", "content": summary}])[-16:]

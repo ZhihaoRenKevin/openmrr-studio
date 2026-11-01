@@ -1,7 +1,7 @@
 """Pure-BSD Conformal Waveguide & Multilayer Triangular Mesher (`scikit-fem`).
 
 Eliminates GPL (`gmsh` / `femwell`) dependencies from the default eigenmode solver
-stack so `OpenMRR Studio` can be distributed under permissive MIT / BSD-3-Clause
+stack so `MicroRing Studio` can be distributed under permissive MIT / BSD-3-Clause
 or commercial licenses on both macOS and Windows with zero external C++ mesher
 binaries required.
 

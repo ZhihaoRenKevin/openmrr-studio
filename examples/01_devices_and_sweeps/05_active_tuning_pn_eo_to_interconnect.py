@@ -1,6 +1,6 @@
 """Cookbook 05: 2D-FEM Active Tuning (Si PN/PIN, Pockels EO, Thermo-Optic) & Lumerical INTERCONNECT.
 
-Demonstrates 100% pure-Python, zero-COMSOL multiphysics active tuning in OpenMRR Studio:
+Demonstrates 100% pure-Python, zero-COMSOL multiphysics active tuning in MicroRing Studio:
   1. Silicon Lateral PN Depletion (`0` to `-5 V`): 2D Debye depletion + Soref-Bennett complex
      `dn + i*dk` fed directly into the 2D conformal vector Maxwell eigenmode solver.
   2. Anisotropic Pockels EO (`X-cut TFLN`): 2D Laplace electrostatic FEM linking electrode gap `G`
@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import (
+from microring import (
     MRRDesignConfig,
     export_lumerical_interconnect_bundle,
     run_active_tuning_analysis,

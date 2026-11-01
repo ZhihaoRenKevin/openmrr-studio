@@ -13,7 +13,7 @@ python benchmarks/generate_and_audit_benchmarks.py
 ```
 
 This benchmark solves the **exact same 2D cylindrical bent waveguide cross-sections** across **five integrated-photonics wavebands** (`Visible 532 nm`, `VNIR 780 nm`, `O-Band 1310 nm`, `C-Band 1550 nm`, and `Mid-IR 4200 nm`) using two mathematically independent Maxwell discretizations:
-1. **`OpenMRR Conformal Vector FEM` (`scikit-fem`)**: Unstructured 2nd-order curl-conforming `Nedelec1` transverse + `Lagrange P2` azimuthal finite elements (`ElementTriN2 * ElementTriP2`) on an interface-conforming pure-BSD Delaunay mesh with exact cylindrical coordinate transformation $\rho(x) = 1 + x/R$.
+1. **`MicroRing Conformal Vector FEM` (`scikit-fem`)**: Unstructured 2nd-order curl-conforming `Nedelec1` transverse + `Lagrange P2` azimuthal finite elements (`ElementTriN2 * ElementTriP2`) on an interface-conforming pure-BSD Delaunay mesh with exact cylindrical coordinate transformation $\rho(x) = 1 + x/R$.
 2. **`Structured Yee-Grid FDE` (`tidy3d` local CPU `ModeSolver`)**: Finite-difference frequency-domain eigenmode discretization on a staggered Yee lattice (the same discretization family used by commercial FDE mode solvers).
 
 ### Verified Cross-Solver Results (`Darwin-arm64`, Python 3.12)
@@ -26,7 +26,7 @@ This benchmark solves the **exact same 2D cylindrical bent waveguide cross-secti
 | `CBand_1550nm_4HSiC_Pulley` | `1550.0` | `600 nm 4H-SiC / SiO2` (`82°`) | `40.0` | `2.275336` | `2.274984` | **`3.52e-04`** | `2.7978` | `3.417` | `0.0365` |
 | `MidIR_4200nm_Ge_CaF2` | `4200.0` | `1.4 µm Ge rib (0.3 µm slab) / CaF2 / Air` | `65.0` | `3.704086` | `3.703304` | **`7.82e-04`** | `4.3295` | `9.168` | `0.0063` |
 
-> **Why Conformal FEM Matters on Slanted High-Index Sidewalls**: On high-contrast slanted sidewalls (`Si` or `Ge` with `82°–88°` etch angles), a coarse Cartesian Yee grid without subpixel permittivity averaging snaps the slanted wall to the nearest Yee cell face, introducing `1e-2` staircase bias unless `dl <= 5–10 nm`. OpenMRR's transfinite conformal triangular mesher aligns element edges directly along angled sidewalls at any angle `70°–90°` with zero staircasing.
+> **Why Conformal FEM Matters on Slanted High-Index Sidewalls**: On high-contrast slanted sidewalls (`Si` or `Ge` with `82°–88°` etch angles), a coarse Cartesian Yee grid without subpixel permittivity averaging snaps the slanted wall to the nearest Yee cell face, introducing `1e-2` staircase bias unless `dl <= 5–10 nm`. MicroRing's transfinite conformal triangular mesher aligns element edges directly along angled sidewalls at any angle `70°–90°` with zero staircasing.
 
 ---
 
@@ -42,7 +42,7 @@ python benchmarks/generate_and_audit_benchmarks.py
 python benchmarks/run_lumapi_validation.py
 ```
 
-This generates `benchmarks/outputs/lumerical_vs_openmrr_validation.csv` and `LUMERICAL_VALIDATION_REPORT.md` with matched diagonal refractive index tensors `(nx, ny, nz)`, sidewall angles, slab heights, and fundamental-mode port expansions (`|S21|^2`).
+This generates `benchmarks/outputs/lumerical_vs_microring_validation.csv` and `LUMERICAL_VALIDATION_REPORT.md` with matched diagonal refractive index tensors `(nx, ny, nz)`, sidewall angles, slab heights, and fundamental-mode port expansions (`|S21|^2`).
 
 ---
 
@@ -52,10 +52,10 @@ Reproducible locally with zero COMSOL or Lumerical licenses via:
 
 ```bash
 python examples/01_devices_and_sweeps/05_active_tuning_pn_eo_to_interconnect.py
-python tests/test_openmrr_all.py
+python tests/test_microring_all.py
 ```
 
-OpenMRR Studio `v3.4.0` solves cross-section active perturbations natively in `scikit-fem` and injects cell-wise $\Delta\varepsilon(x,y) = (n_0 + \Delta n + i\Delta k)^2 - n_0^2$ (`ElementDG(ElementTriP1())`) directly into the 2D curl-conforming `Nedelec1 * Lagrange P2` Maxwell eigenmode solver (`solve_perturbed_neff_sweep_fem`):
+MicroRing Studio `v3.4.0` solves cross-section active perturbations natively in `scikit-fem` and injects cell-wise $\Delta\varepsilon(x,y) = (n_0 + \Delta n + i\Delta k)^2 - n_0^2$ (`ElementDG(ElementTriP1())`) directly into the 2D curl-conforming `Nedelec1 * Lagrange P2` Maxwell eigenmode solver (`solve_perturbed_neff_sweep_fem`):
 
 | Active Mechanism | Cross-Section PDE / Carrier Physics | Verified Benchmark (`Darwin-arm64`) | Extracted Figure of Merit |
 | :--- | :--- | :--- | :--- |
@@ -66,15 +66,37 @@ OpenMRR Studio `v3.4.0` solves cross-section active perturbations natively in `s
 
 ---
 
-## 4. Physical Scope Boundaries
+## 4. License-Free Chip I/O (`2D-FEM Butt` & `2D-FDFD Grating Couplers`) & High-$Q$ Convergence (`v3.5.0`)
 
-- **High-Confidence Regime (`OpenMRR Studio` 2D Bent FEM + Spatial CMT + 2D Multiphysics FEM)**:
-  - Guided straight and moderately bent waveguide dispersion ($n_{\mathrm{eff}}$, $n_g$, FSR, single-mode cutoff $W_{\mathrm{SM}}$);
+Reproducible locally with zero Lumerical, COMSOL, or RSoft licenses via:
+
+```bash
+python examples/01_devices_and_sweeps/06_butt_gc_couplers_and_high_q_fdtd.py
+```
+
+### Verified Benchmarks (`Darwin-arm64`, Python 3.12)
+
+| Module & Benchmark Case | Numerical Formulation | Wall Time | Key Physical Outputs |
+| :--- | :--- | :---: | :--- |
+| **Butt Coupler (`220 nm` SOI $\rightarrow$ `2.5 µm` Lensed Fiber)** | 2D Conformal Vector Maxwell FEM + Complex Poynting Overlap + Adiabatic EME | `2.10 s` | Optimal $W_{\mathrm{tip}} = 214\text{ nm}$, Total $\mathrm{IL} = 0.56\text{ dB}$ (`87.9%`), `1-dB` Align Tol $= (\pm 0.53, \pm 0.52)\,\mu\text{m}$ |
+| **Butt Coupler (`300 nm` Si3N4 O-Band $\rightarrow$ III-V DFB `2.4×1.2 µm`)** | Elliptical Laser Mode Complex Poynting Overlap + Facet AR | `2.15 s` | Optimal $W_{\mathrm{tip}} = 304\text{ nm}$, Total $\mathrm{IL} = 0.61\text{ dB}$ (`86.8%`), `1-dB` Align Tol $= (\pm 0.51, \pm 0.32)\,\mu\text{m}$ |
+| **Uniform `220 nm` SOI Grating Coupler (`70 nm` etch, `2 µm` BOX, `10°`)** | 2nd-Order Rytov Bloch Synthesis + Native 2D Full-Wave Maxwell `FDFD` (`UPML`) | `2.45 s` | Pitch $\Lambda = 634.1\text{ nm}$, Peak $\mathrm{IL} = 2.85\text{ dB}$ (`51.9%`), `1-dB / 3-dB BW` $= 39.6 / 71.2\text{ nm}$, $S_{11} = -27.5\text{ dB}$ |
+| **Apodized Focusing `220 nm` SOI Grating Coupler (`ff` `0.87 -> 0.48`)** | Variable-Fill Gaussian Apodization + 2D Full-Wave `FDFD` + `SPAR .dat` | `2.55 s` | Peak $\mathrm{IL} = 2.62\text{ dB}$ (`54.7%`), `1-dB / 3-dB BW` $= 34.8 / 61.8\text{ nm}$, $S_{11} = -22.7\text{ dB}$, `passivity = True` |
+| **Ultra-High-$Q$ `Si3N4` Pulley Ring (`R = 100 µm`, `α = 0.08 dB/cm`)** | Sub-fm `sinh` Grid + Exact $M \to \infty$ TMM vs Finite-$M$ Truncated FDTD | `1.10 s` | $Q_L = 3,022,829$ ($\mathrm{FWHM} = 0.513\text{ pm}$, $\tau_{\mathrm{ph}} = 2.49\text{ ns}$), `1e-5` FDTD needs `28.64 ns` (`8,287` RTs) vs `0.67 ps` Coupler Cutout (`42,488x` faster) |
+
+---
+
+## 5. Physical Scope Boundaries
+
+- **High-Confidence Regime (`MicroRing Studio` 2D Bent FEM + Spatial CMT + 2D FDFD + 2D Multiphysics FEM)**:
+  - Guided straight and moderately bent waveguide dispersion ($n_{\mathrm{eff}}$, $n_g$, FSR, single-mode cutoff $W_{\mathrm{SM}}$) and steady-state High-$Q$ resonance spectra ($Q = 10^4$ to $10^8+$);
   - Weak-to-moderate evanescent couplers (`gap >= 150 nm` in NIR, `>= 300 nm` in Mid-IR) including phase-mismatched wrap-around pulley couplers;
+  - Inverse-taper Butt/Edge couplers (`2D Vector FEM` + complex Poynting overlap) and 1D-periodic uniform or apodized curved-focusing Surface Grating Couplers (`2D Full-Wave Sagittal FDFD` + lateral width overlap);
   - Cross-sectional 2D Fourier thermo-optic (`TiN`/`Pt`/`W` microheaters), 2D Laplace Pockels electro-optic (`GSG`/vertical electrodes), and Silicon PN depletion / PIN injection perturbed eigenmode shifts;
   - Positive vs. negative photoresist exposure-dose / CD-bias coupling drift and 5-cell pre-biased mask synthesis;
   - Post-fabrication Lorentzian, CW/CCW Split-Doublet, Fano, and Multi-FSR transmission fitting.
 - **Regimes Requiring Full `3D FDTD` / `3D TCAD` Before Final Foundry Tape-Out**:
-  - Ultra-tight sub-`120 nm` high-index-contrast gaps where strong supermode distortion and parasitic coupler radiation loss ($1 - |S_{21}|^2 - |S_{31}|^2 > 1\%$) occur;
+  - Ultra-tight sub-`120 nm` high-index-contrast gaps where strong supermode distortion and parasitic coupler radiation loss ($1 - |S_{21}|^2 - |S_{31}|^2 > 1\%$) occur (use `export_coupler_cutout_gds` to simulate only the `< 1 ps` single-pass coupler region in 3D FDTD);
+  - 2D pillar subwavelength metamaterial (`SWG`) grating couplers, polarization-splitting 2D gratings, or ultra-short non-adiabatic 3D multi-tip spot-size converters;
   - Abrupt straight-to-bend racetrack junctions without adiabatic Euler transitions, or 3D in-plane longitudinal heat spreading near short heater corners / thermal isolation trenches;
   - Ultra-sharp bends ($R < 5\,\mu\text{m}$ in `Si3N4` or thin-BOX substrate leakage) where radiative $Q_{\mathrm{rad}}$ limits unloaded $Q_{\mathrm{int}}$.

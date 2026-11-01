@@ -7,7 +7,7 @@
      - Engine B: Structured Yee-Grid Finite-Difference Eigenmode (`tidy3d` local CPU FDE,
        same Yee-cell discretization family as Ansys Lumerical MODE FDE)
 3. Exports:
-     - `outputs/openmrr_vs_fde_multiband.csv` (unit-labeled columns)
+     - `outputs/microring_vs_fde_multiband.csv` (unit-labeled columns)
      - `outputs/LOCAL_CROSSCHECK_REPORT.md`
      - Canonical `.gds` layout files + `outputs/lumerical_cases.json` for 1-command head-to-head
        execution against Ansys Lumerical `MODE FDE` + `3D FDTD` via `run_lumapi_validation.py`.
@@ -28,13 +28,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr.eigenmode_solver import (
+from microring.eigenmode_solver import (
     WaveguideCrossSectionSpec,
     solve_modes_fde_tidy3d,
     solve_modes_fem,
 )
-from openmrr.materials import T_REF_K, get_material_fn
-from openmrr.mrr_topologies import MRRDesignConfig, export_mrr_gds, simulate_mrr_topology
+from microring.materials import T_REF_K, get_material_fn
+from microring.mrr_topologies import MRRDesignConfig, export_mrr_gds, simulate_mrr_topology
 
 OUT_DIR = Path(__file__).resolve().parent / "outputs"
 
@@ -202,7 +202,7 @@ def main() -> None:
             )
         )
 
-        # Full OpenMRR resonator + coupler synthesis + GDS export
+        # Full MicroRing resonator + coupler synthesis + GDS export
         cfg = MRRDesignConfig(
             topology=c["topology"],
             core_material=c["core_material"],
@@ -235,8 +235,8 @@ def main() -> None:
             "neff_bsd_fem": round(neff_fem, 6),
             "neff_yee_fde": round(neff_fde, 6),
             "abs_diff_neff": round(diff_neff, 6),
-            "ng_openmrr": mrr["metrics"]["ng_ring"],
-            "FSR_nm_openmrr": mrr["metrics"]["FSR_nm"],
+            "ng_microring": mrr["metrics"]["ng_ring"],
+            "FSR_nm_microring": mrr["metrics"]["FSR_nm"],
             "kappa_power_thru_cmt": mrr["metrics"]["kappa_power_thru"],
             "Q_ext_thru_cmt": mrr["metrics"]["Q_ext_thru"],
             "cc_param": mrr["critical_coupling"]["parameter"],
@@ -253,7 +253,7 @@ def main() -> None:
             "n_core_xyz": [round(mc.nx, 6), round(mc.ny, 6), round(mc.nz, 6)],
             "n_clad": round(mcl.nx, 6),
             "n_top": round(mtp.nx, 6),
-            "openmrr_reference": row,
+            "microring_reference": row,
         })
         print(
             f"[{c['case_id']:<26}] wl={wl_nm:6.1f} nm | FEM={neff_fem:.6f} | "
@@ -261,20 +261,20 @@ def main() -> None:
         )
 
     # Save CSV with solver provenance header & physical unit column names
-    csv_path = OUT_DIR / "openmrr_vs_fde_multiband.csv"
+    csv_path = OUT_DIR / "microring_vs_fde_multiband.csv"
     header_cols = (
         "case_id,wavelength_nm,bend_radius_um,neff_bsd_fem,neff_yee_fde,abs_diff_neff,"
-        "ng_openmrr,FSR_nm_openmrr,kappa_power_thru_cmt,Q_ext_thru_cmt,cc_target_val"
+        "ng_microring,FSR_nm_microring,kappa_power_thru_cmt,Q_ext_thru_cmt,cc_target_val"
     )
     host_tag = f"{platform.system()}-{platform.machine()} (Python {platform.python_version()})"
     lines = [
-        f"# Host={host_tag} | OpenMRR BSD Conformal FEM vs Tidy3D Yee-Grid FDE",
+        f"# Host={host_tag} | MicroRing BSD Conformal FEM vs Tidy3D Yee-Grid FDE",
         header_cols,
     ]
     for r in rows:
         lines.append(
             f"{r['case_id']},{r['wavelength_nm']},{r['bend_radius_um']},{r['neff_bsd_fem']},"
-            f"{r['neff_yee_fde']},{r['abs_diff_neff']},{r['ng_openmrr']},{r['FSR_nm_openmrr']},"
+            f"{r['neff_yee_fde']},{r['abs_diff_neff']},{r['ng_microring']},{r['FSR_nm_microring']},"
             f"{r['kappa_power_thru_cmt']},{r['Q_ext_thru_cmt']},{r['cc_target_val']}"
         )
     csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -289,7 +289,7 @@ def main() -> None:
         "",
         f"- **Host**: `{host_tag}` (`{time.perf_counter() - t0:.1f} s` wall-clock)",
         "- **Solvers Compared Locally**:",
-        "  1. `OpenMRR Conformal Vector FEM` (`scikit-fem` 2nd-order `N2/P2`, zero-GPL BSD Delaunay mesher)",
+        "  1. `MicroRing Conformal Vector FEM` (`scikit-fem` 2nd-order `N2/P2`, zero-GPL BSD Delaunay mesher)",
         "  2. `Tidy3D Local CPU Yee-Grid FDE` (structured Yee finite-difference eigenmode discretization)",
         "- **Scope Boundary**: This report verifies 2D bent Maxwell eigenmode agreement (`|Delta n_eff|`) across 5 wavebands (`532 nm` to `4200 nm`). Full commercial Ansys Lumerical `MODE FDE` + `3D FDTD` coupler S-parameter (`S21`/`S31`) validation is executed on a Lumerical-equipped workstation via `run_lumapi_validation.py`.",
         "",
@@ -300,7 +300,7 @@ def main() -> None:
         md.append(
             f"| `{r['case_id']}` | {r['wavelength_nm']:.1f} | {r['bend_radius_um']:.1f} | "
             f"{r['neff_bsd_fem']:.6f} | {r['neff_yee_fde']:.6f} | `{r['abs_diff_neff']:.2e}` | "
-            f"{r['ng_openmrr']:.4f} | {r['FSR_nm_openmrr']:.3f} | {r['kappa_power_thru_cmt']:.4f} |"
+            f"{r['ng_microring']:.4f} | {r['FSR_nm_microring']:.3f} | {r['kappa_power_thru_cmt']:.4f} |"
         )
     (OUT_DIR / "LOCAL_CROSSCHECK_REPORT.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print(f"\nSaved {csv_path} and {OUT_DIR / 'LOCAL_CROSSCHECK_REPORT.md'}")

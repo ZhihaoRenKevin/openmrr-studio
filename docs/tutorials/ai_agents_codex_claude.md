@@ -1,12 +1,12 @@
-# Using OpenMRR Studio Offline or Online with Claude, Codex & Local LLMs
+# Using MicroRing Studio Offline or Online with Claude, Codex & Local LLMs
 
-OpenMRR Studio works **100% offline out-of-the-box** and also connects cleanly to **Claude**, **OpenAI Codex**, and **Local Ollama / MLX** with **ultra-minimal token consumption (<150 tokens per physics call)** by running 100% of numerical solvers locally on your CPU / Apple Silicon AMX / NVIDIA CUDA GPU.
+MicroRing Studio works **100% offline out-of-the-box** and also connects cleanly to **Claude**, **OpenAI Codex**, and **Local Ollama / MLX** with **ultra-minimal token consumption (<150 tokens per physics call)** by running 100% of numerical solvers locally on your CPU / Apple Silicon AMX / NVIDIA CUDA GPU.
 
 ---
 
 ## 1. Switch Offline vs. Online AI Directly Inside the Studio UI
 
-Above the chat box in OpenMRR Studio, select any of the 4 AI modes at any time:
+Above the chat box in MicroRing Studio, select any of the 4 AI modes at any time:
 1. **`⚡ Offline · Built-in Copilot` *(Default)***: 100% offline deterministic physics copilot (`0` tokens, zero internet needed).
 2. **`🖥 Offline · Local Ollama / MLX`**: Connects locally to `http://127.0.0.1:11434` (`Ollama`) or `http://127.0.0.1:1234/v1` (`LM Studio`) with zero cloud data transfer.
 3. **`🟣 Online · Claude`**: Automatically uses your locally signed-in `claude` (`Claude Code` CLI) login with zero extra API key needed, or accepts an optional in-memory API key via **`🔑 Key`**.
@@ -19,23 +19,23 @@ Above the chat box in OpenMRR Studio, select any of the 4 AI modes at any time:
 ## 2. Connect Directly to `Claude` or `Codex` via MCP (`<150 tokens/call`)
 
 ### OpenAI Codex (`Codex CLI` & `Codex Desktop`)
-1. When you open `openmrr-studio` in Codex, Codex automatically reads [`AGENTS.md`](../../AGENTS.md) to invoke `openmrr agent` subcommands locally.
+1. When you open `microring-studio` in Codex, Codex automatically reads [`AGENTS.md`](../../AGENTS.md) to invoke `microring agent` subcommands locally.
 2. Optional MCP registration (`~/.codex/config.toml`):
    ```toml
-   [mcp_servers.openmrr]
+   [mcp_servers.microring]
    command = "uv"
-   args = ["--directory", "/path/to/openmrr-studio", "run", "openmrr", "mcp"]
+   args = ["--directory", "/path/to/microring-studio", "run", "microring", "mcp"]
    ```
 
 ### Claude Code & Claude Desktop
-1. Opening `openmrr-studio` in `claude` automatically detects [`.mcp.json`](../../.mcp.json), exposing all 8 `openmrr_*` MCP tools (`openmrr_status`, `openmrr_width_cutoff`, `openmrr_design_mrr`, `openmrr_sweep_mrr`, `openmrr_fab_tolerance`, `openmrr_active_tuning`, `openmrr_inspect_gds`, `openmrr_fit_spectrum`).
+1. Opening `microring-studio` in `claude` automatically detects [`.mcp.json`](../../.mcp.json), exposing all 10 `microring_*` MCP tools (`microring_status`, `microring_width_cutoff`, `microring_design_mrr`, `microring_sweep_mrr`, `microring_fab_tolerance`, `microring_active_tuning`, `microring_io_coupler`, `microring_high_q_fdtd`, `microring_inspect_gds`, `microring_fit_spectrum`).
 2. For Claude Desktop (`claude_desktop_config.json`):
    ```json
    {
      "mcpServers": {
-       "openmrr": {
+       "microring": {
          "command": "uv",
-         "args": ["--directory", "/path/to/openmrr-studio", "run", "openmrr", "mcp"]
+         "args": ["--directory", "/path/to/microring-studio", "run", "microring", "mcp"]
        }
      }
    }

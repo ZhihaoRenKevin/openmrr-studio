@@ -1,13 +1,13 @@
-"""Command-Line Interface (`openmrr`) for `OpenMRR Studio`.
+"""Command-Line Interface (`microring`) for `MicroRing Studio`.
 
 Supports human interactive modes AND ultra-low-token AI agent / MCP modes:
-  openmrr                       # Launch native desktop UI window (falls back to browser)
-  openmrr browser               # Open UI in Chrome / Safari / Edge
-  openmrr check                 # Print detected GPU/AMX/CPU engine + 100k-pt benchmark
-  openmrr analyze-gds ring.gds  # Extract MRR topology & dimensions from any .gds/.oas
-  openmrr chat "400 nm Si3N4 pulley all-pass, FSR 150 GHz"
-  openmrr mcp                   # Run stdio MCP server for Claude Code / Codex / Antigravity
-  openmrr agent <tool> ...      # Token-minimal (<150 tokens) local-compute CLI for AI agents
+  microring                       # Launch native desktop UI window (falls back to browser)
+  microring browser               # Open UI in Chrome / Safari / Edge
+  microring check                 # Print detected GPU/AMX/CPU engine + 100k-pt benchmark
+  microring analyze-gds ring.gds  # Extract MRR topology & dimensions from any .gds/.oas
+  microring chat "400 nm Si3N4 pulley all-pass, FSR 150 GHz"
+  microring mcp                   # Run stdio MCP server for Claude Code / Codex / Antigravity
+  microring agent <tool> ...      # Token-minimal (<150 tokens) local-compute CLI for AI agents
 """
 from __future__ import annotations
 
@@ -21,7 +21,9 @@ from .agent_tools import (
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
+    agent_high_q_fdtd,
     agent_inspect_gds,
+    agent_io_coupler,
     agent_status,
     agent_sweep_mrr,
     agent_width_cutoff,
@@ -39,8 +41,8 @@ def _print_compact(data: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="openmrr",
-        description=f"OpenMRR Studio v{__version__} - License-Free Multi-Waveband Photonics Eigenmode, 2D-FEM Active Tuning, CMT, GDSII & AI-Agent MCP Suite",
+        prog="microring",
+        description=f"MicroRing Studio v{__version__} - License-Free Multi-Waveband Photonics Eigenmode, 2D-FEM Active Tuning, CMT, GDSII & AI-Agent MCP Suite",
     )
     sub = parser.add_subparsers(dest="cmd")
 
@@ -160,6 +162,39 @@ def main() -> None:
     p_tu.add_argument("--interconnect", action="store_true", dest="export_interconnect")
     p_tu.add_argument("--json", type=str, default=None, dest="raw_json")
 
+    p_io = ag_sub.add_parser("io-coupler", help="Design Butt/Edge Coupler or 2D-FDFD Grating Coupler (<150 tokens)")
+    p_io.add_argument("--type", type=str, default="grating_coupler", dest="coupler_type")
+    p_io.add_argument("--mat", type=str, default="Si", dest="core_material")
+    p_io.add_argument("--wl", type=float, default=1550.0, dest="wavelength_nm")
+    p_io.add_argument("--pol", type=str, default="TE0", dest="polarization")
+    p_io.add_argument("--h", type=float, default=0.22, dest="film_height_um")
+    p_io.add_argument("--etch", type=float, default=None, dest="etch_depth_um")
+    p_io.add_argument("--w-bus", type=float, default=0.48, dest="w_bus_um")
+    p_io.add_argument("--w-tip", type=float, default=None, dest="w_tip_um")
+    p_io.add_argument("--l-taper", type=float, default=180.0, dest="taper_length_um")
+    p_io.add_argument("--fiber", type=str, default=None, dest="fiber_preset")
+    p_io.add_argument("--angle", type=float, default=10.0, dest="fiber_angle_deg")
+    p_io.add_argument("--box", type=float, default=2.0, dest="box_thickness_um")
+    p_io.add_argument("--uniform", action="store_false", dest="apodized")
+    p_io.add_argument("--linear-gc", action="store_false", dest="focusing")
+    p_io.add_argument("--gds", action="store_true", dest="export_gds")
+    p_io.add_argument("--loopback", action="store_true", dest="include_loopback")
+    p_io.add_argument("--interconnect", action="store_true", dest="export_interconnect")
+    p_io.add_argument("--json", type=str, default=None, dest="raw_json")
+
+    p_hq = ag_sub.add_parser("high-q", help="Diagnose High-Q FDTD ring-down vs exact infinite-RT TMM (<140 tokens)")
+    p_hq.add_argument("--top", type=str, default="pulley_ap", dest="topology")
+    p_hq.add_argument("--mat", type=str, default="Si3N4", dest="core_material")
+    p_hq.add_argument("--h", type=float, default=0.40, dest="film_height_um")
+    p_hq.add_argument("--w-ring", type=float, default=1.20, dest="ring_width_um")
+    p_hq.add_argument("--w-bus", type=float, default=0.95, dest="bus_width_um")
+    p_hq.add_argument("--r", type=float, default=80.0, dest="ring_radius_um")
+    p_hq.add_argument("--gap", type=float, default=0.35, dest="gap_thru_um")
+    p_hq.add_argument("--loss", type=float, default=0.08, dest="alpha_loss_db_per_cm")
+    p_hq.add_argument("--cc", action="store_true", dest="apply_cc")
+    p_hq.add_argument("--cutout", action="store_true", dest="export_cutout")
+    p_hq.add_argument("--json", type=str, default=None, dest="raw_json")
+
     args = parser.parse_args()
 
     if args.cmd in (None, "app"):
@@ -218,6 +253,10 @@ def main() -> None:
             _print_compact(agent_fab_tolerance(d))
         elif args.agent_cmd == "active-tuning":
             _print_compact(agent_active_tuning(d))
+        elif args.agent_cmd == "io-coupler":
+            _print_compact(agent_io_coupler(d))
+        elif args.agent_cmd == "high-q":
+            _print_compact(agent_high_q_fdtd(d))
 
 
 if __name__ == "__main__":

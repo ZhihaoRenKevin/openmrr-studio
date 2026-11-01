@@ -1,24 +1,31 @@
-# OpenMRR Studio（开源集成光子微环仿真、光刻剂量容差与双向 GDSII 平台）
+# MicroRing Studio（开源光子芯片 PIC、微环谐振器、端面/光栅耦合器与超高 Q 仿真设计平台）
 
-**无需 Ansys Lumerical、Synopsys RSoft 或 COMSOL 商业许可证 —— 通过对话式 AI 光子设计助手（Copilot）、全矢量本征模与耦合模引擎、正/负胶光刻剂量误差（Over/Under-Dose）分析器与双向 GDSII 版图桥，一站式完成微环谐振器（MRR）选型、单模截止校验、临界耦合综合、工艺窗口评估、预偏置版图生成与实验光谱拟合。**
+**无需 Ansys Lumerical MODE/FDTD、Synopsys RSoft 或 COMSOL 商业许可证 —— 通过中英双语 AI 光子设计助手（Copilot）、2D 全矢量本征模与空间耦合模引擎、纯自研 2D-FEM 端面耦合器（Butt/Edge Coupler）与 2D 全波 `FDFD` 表面光栅耦合器（Grating Coupler）、超高 Q（`10^4`–`10^8+`）瞬时稳态收敛引擎、2D-FEM 有源调谐（`TO`/`EO`/`硅 PN`）、Lumerical INTERCONNECT 导出及双向 GDSII 版图桥，一站式打通光子集成电路（PIC）与光模块互连从物理仿真到流片掩膜的全流程。**
 
 [English](../README.md) | [简体中文](./README_zh-CN.md) | [求解器交叉验证与基准](./VERIFICATION_AND_BENCHMARKS.md) | [对话与 GDS 进阶教程](./tutorials/chatbot_and_gds_guide.md) | [Codex 与 Claude 极省 Token 接入指南](./tutorials/ai_agents_codex_claude.md) | [llms.txt](./llms.txt) | [更新日志](../CHANGELOG.md)
 
-[![Run Online in Browser](https://img.shields.io/badge/Run_Online-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/ZhihaoRenKevin/openmrr-studio?quickstart=1)
-[![Desktop Installers: .dmg & .exe](https://img.shields.io/badge/Desktop_App-macOS_.dmg_%7C_Win_.exe-0284c7)](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest)
+[![Run Online in Browser](https://img.shields.io/badge/Run_Online-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/ZhihaoRenKevin/microring-studio?quickstart=1)
+[![Desktop Installers: .dmg & .exe](https://img.shields.io/badge/Desktop_App-macOS_.dmg_%7C_Win_.exe-0284c7)](https://github.com/ZhihaoRenKevin/microring-studio/releases/latest)
+[![Release: v3.5.0](https://img.shields.io/badge/release-v3.5.0-10b981.svg)](https://github.com/ZhihaoRenKevin/microring-studio/releases/tag/v3.5.0)
 [![Wavebands: 400nm–14µm](https://img.shields.io/badge/wavebands-400nm%20Vis%20to%2014%CE%BCm%20Mid--IR-ec4899.svg)](./VERIFICATION_AND_BENCHMARKS.md)
 [![AI Modes: Offline | Claude | Codex | Ollama](https://img.shields.io/badge/AI_Modes-Offline_%7C_Claude_%7C_Codex_%7C_Ollama-8b5cf6.svg)](./tutorials/ai_agents_codex_claude.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](../pyproject.toml)
 
-![OpenMRR Studio Overview](./images/hero_openmrr_overview.png)
+![MicroRing Studio Overview](./images/hero_microring_overview.png)
 *上图完全由仓库内 `benchmarks/generate_hero_figure.py` 无商业软件直接求解生成：**（a）** 2D 全矢量弯曲波导保形有限元模场（`4H-SiC`，`R = 40 um`，`82°` 侧壁倾角），**（b）** 同心滑轮耦合器（Pulley）包角扫描与自动临界耦合点（`theta_CC`）综合，**（c）** `X切薄膜铌酸锂（TFLN）` 跑道微环电光调谐光谱（`0 V` vs `+25 V`），**（d）** 实测级顺/逆时针背向散射劈裂双峰（Split-Doublet）CMT 参数提取。*
 
 ---
 
 ## 核心亮点
 
-1. **6 步引导式中英双语光子设计助手（`EN | 中文` 一键切换）**：
+1. **解决高 Q 微环在 Lumerical FDTD 中极慢且无法收敛的痛点（`v3.5.0` 新增）**：
+   - 对于低损耗 `Si3N4`、`TFLN` 或 `4H-SiC` 高 Q 微环（如 `Q_loaded = 3.02 × 10^6`，腔内光子寿命 `τ_ph = 2487 ps`），时域 3D-FDTD 要达到 `auto shutoff = 1e-5` 需仿真 **`28.64 ns`（超过 `8,200` 圈往返！）**；提前截断会导致严重的 FFT `sinc` 振铃伪影并使表观消光比从 `64.8 dB` 坍塌至 `< 2 dB`。
+   - **MicroRing Studio** 采用亚飞米级（`0.1 fm`）双曲正弦谐振加密与解析无限圈稳态传递矩阵（$M \to \infty$），在 **`~1 秒`** 内精确求解任意 `Q = 10^4` 至 `10^8+` 谐振谱，并支持一键导出 **单程耦合区 3D-FDTD 切片（`.GDS` + `.lsf`，仅需 `0.67 ps`，提速 `> 40,000×`）**。
+2. **100% 免商业软件的芯片端面耦合器（Butt/Edge Coupler）与二维全波 `FDFD` 表面光栅耦合器（Grating Coupler，`v3.5.0` 新增）**：
+   - **端面模斑转换器（`design_butt_edge_coupler`）**：基于原生 2D 保形全矢量 Maxwell FEM 与复数坡印廷矢量重叠积分，自动优选倒锥尖端宽度 `W_tip`，精准对接 8 类光纤与 III-V DFB 半导体激光器（如 `2.5 µm` 透镜光纤总插损 **`0.56 dB`**、`2.4 × 1.2 µm` DFB 激光器直耦 **`0.61 dB`**），给出 `1-dB / 3-dB` 横纵对准容差与绝热锥长。
+   - **表面光栅耦合器（`design_grating_coupler`）**：二阶 Rytov 等效介质 Bragg / 高斯切趾齿列综合 + 原生 **二维全波频域有限差分（`2D Full-Wave Maxwell FDFD` + `UPML` 吸收边界）**，完整计算浅刻蚀齿槽、上包层、`BOX` 埋氧层与底层硅衬底反射干涉（`220 nm` SOI 切趾聚焦光栅峰值插损 **`2.62 dB`**，`1-dB` 带宽 **`34.8 nm`**，约 `2.5 秒` 出全谱与二维辐射电场图），支持一键导出 **`127 µm` 光纤阵列 + 微环回环校准 `.GDS`** 与 **INTERCONNECT 2 端口 `SPAR` 压缩包**。
+3. **6 步引导式中英双语光子设计助手（`EN | 中文` 一键切换）**：
    告别复杂的参数面板，每次只问一个清晰问题（`1. 选择目标` $\rightarrow$ `2. 工作波段` $\rightarrow$ `3. 波导材料` $\rightarrow$ `4. 晶圆截面与单模截止` $\rightarrow$ `5. 传播损耗 dB/cm` $\rightarrow$ `6. 微环拓扑、目标 FSR、临界耦合与 GDS 导出`），顶部可随时一键切换中英文。
 2. **纯自研 2D-FEM 多物理场有源调谐（`TO` / `EO` / `硅 PN-PIN`）与 Ansys Lumerical INTERCONNECT 导出（`v3.4.0` 新增，零 COMSOL 依赖）**：
    - **截面多物理场有限元全自研**：内置 **2D Fourier 热传导有限元**（关联微加热器材质/宽度/间距与埋氧层 `BOX` 厚度，直接给出 $R_{\mathrm{th}}$、$P_\pi$ 与 $f_{3\mathrm{dB,TO}}$）、**2D 各向异性 Laplace 静电场有限元**（关联共面 `GSG` 或垂直电极间距与介电屏蔽，给出 $V_\pi L$ 与电光电容带宽）以及 **2D 硅横向 PN 耗尽 / PIN 注入模型**（Soref-Bennett 复数等离子体色散 $\Delta n + i\Delta k$，同步捕获谐振漂移与自由载流子吸收 FCA）。
@@ -45,21 +52,21 @@
 
 ### 方式一：像普通桌面软件一样离线安装（`.dmg` 与 `.exe` 免配置安装包，无需装 Python）
 
-直接前往 [**GitHub Releases 发布页**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) 下载对应系统的独立安装包：
+直接前往 [**GitHub Releases 发布页**](https://github.com/ZhihaoRenKevin/microring-studio/releases/latest) 下载对应系统的独立安装包：
 
 | 操作系统 | 安装包文件 | 安装与首次打开方法 |
 | :--- | :--- | :--- |
-| **macOS（Apple Silicon）** | [**`OpenMRR-Studio-v3.4.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | 双击打开 `.dmg`，将 **`OpenMRR Studio.app`** 拖入 **`Applications（应用程序）`**。*（首次打开开源未公证应用时，请右键点击 **`OpenMRR Studio.app`** $\rightarrow$ 选择 **打开（Open）**，或在 **系统设置 $\rightarrow$ 隐私与安全性** 中点击“仍要打开”。）* |
-| **Windows 10 / 11（64位）** | **`OpenMRR-Studio-v3.4.0-Windows-Setup-x64.exe`** *（或免安装 `.zip`）* | 双击运行 **`Setup.exe`** 安装向导（无需管理员密码，自动创建桌面与开始菜单快捷方式）；也可按下方“方式三”下载源码 ZIP 后双击 `launchers\OpenMRR_Windows.bat` 一键自动配置。 |
+| **macOS（Apple Silicon）** | [**`MicroRing-Studio-v3.5.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/microring-studio/releases/latest) | 双击打开 `.dmg`，将 **`MicroRing Studio.app`** 拖入 **`Applications（应用程序）`**。*（首次打开开源未公证应用时，请右键点击 **`MicroRing Studio.app`** $\rightarrow$ 选择 **打开（Open）**，或在 **系统设置 $\rightarrow$ 隐私与安全性** 中点击“仍要打开”。）* |
+| **Windows 10 / 11（64位）** | **`MicroRing-Studio-v3.5.0-Windows-Setup-x64.exe`** *（或免安装 `.zip`）* | 双击运行 **`Setup.exe`** 安装向导（无需管理员密码，自动创建桌面与开始菜单快捷方式）；也可按下方“方式三”下载源码 ZIP 后双击 `launchers\MicroRing_Windows.bat` 一键自动配置。 |
 
-*（独立桌面版导出的 `.gds` 版图、`.lyp` 图层配色与 `.csv` 光谱默认保存在本地 `~/Documents/OpenMRR_Studio/` 目录。）*
+*（独立桌面版导出的 `.gds` 版图、`.lyp` 图层配色与 `.csv` 光谱默认保存在本地 `~/Documents/MicroRing_Studio/` 目录。）*
 
 ---
 
 ### 方式二：零安装在线网页运行 + 自由切换 `离线 / Claude / Codex` 模式
 
 1. **浏览器一键在线运行（`GitHub Codespaces` 零本地安装）**：
-   点击顶部绿色徽章 [**Run Online in GitHub Codespaces**](https://codespaces.new/ZhihaoRenKevin/openmrr-studio?quickstart=1)，GitHub 会自动启动云端容器并在网页中打开 OpenMRR Studio 交互工作台（端口 `8765`），无需在本地安装任何环境。
+   点击顶部绿色徽章 [**Run Online in GitHub Codespaces**](https://codespaces.new/ZhihaoRenKevin/microring-studio?quickstart=1)，GitHub 会自动启动云端容器并在网页中打开 MicroRing Studio 交互工作台（端口 `8765`），无需在本地安装任何环境。
 2. **界面内一键切换离线与在线 AI 模式（`⚡ 离线引擎` | `🖥 本地 Ollama` | `🟣 Claude` | `🟢 Codex`）**：
    在左下角聊天输入框上方可随时切换 4 种模式：
    - **`⚡ 离线模式 · 内置物理引擎`（默认）**：100% 断网可用，零 Token 消耗。
@@ -76,8 +83,8 @@
 
 1. 点击仓库主页右上角绿色按钮 **`<> Code`** $\rightarrow$ **`Download ZIP`** 并解压。
 2. 打开 `launchers/` 目录，双击对应系统的启动脚本：
-   - **Windows 10 / 11**：双击 **`launchers\OpenMRR_Windows.bat`**
-   - **macOS**：右键点击 **`launchers/OpenMRR_macOS.command`** $\rightarrow$ **打开（Open）**
+   - **Windows 10 / 11**：双击 **`launchers\MicroRing_Windows.bat`**
+   - **macOS**：右键点击 **`launchers/MicroRing_macOS.command`** $\rightarrow$ **打开（Open）**
 3. **首次运行（约 1 分钟）**会自动创建 `.venv` 并装好全部科学计算包，后续每次双击 **`< 2 秒`** 即可启动。
 
 ---
@@ -86,8 +93,8 @@
 
 #### Windows 10 / 11（打开 `PowerShell` 或 `CMD`）
 ```powershell
-git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
-cd openmrr-studio
+git clone https://github.com/ZhihaoRenKevin/microring-studio.git
+cd microring-studio
 
 python -m venv .venv
 .venv\Scripts\activate
@@ -95,13 +102,13 @@ pip install -U pip
 pip install -e ".[desktop]"
 
 # 启动桌面软件界面：
-openmrr
+microring
 ```
 
 #### macOS 或 Linux（打开终端 `Terminal`）
 ```bash
-git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
-cd openmrr-studio
+git clone https://github.com/ZhihaoRenKevin/microring-studio.git
+cd microring-studio
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -109,30 +116,30 @@ pip install -U pip
 pip install -e ".[desktop]"
 
 # 启动桌面软件界面：
-openmrr
+microring
 ```
 
 > **提示（独立窗口 vs 浏览器模式）**：
-> - 输入 `openmrr` 启动原生桌面窗口（若未装 `pywebview` 会自动回退至浏览器）；
-> - 输入 `openmrr browser` 可直接在 Chrome / Edge / Safari 打开本地工作台 `http://127.0.0.1:8765`（完全本地离线，不上传任何数据）。
+> - 输入 `microring` 启动原生桌面窗口（若未装 `pywebview` 会自动回退至浏览器）；
+> - 输入 `microring browser` 可直接在 Chrome / Edge / Safari 打开本地工作台 `http://127.0.0.1:8765`（完全本地离线，不上传任何数据）。
 
 <details>
 <summary><b>方式五：使用 Conda、<code>uv</code> 或启用 NVIDIA CUDA GPU 加速（点击展开）</b></summary>
 
 #### 使用 Conda / Miniforge
 ```bash
-conda create -n openmrr python=3.12 -y
-conda activate openmrr
-git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
-cd openmrr-studio
+conda create -n microring python=3.12 -y
+conda activate microring
+git clone https://github.com/ZhihaoRenKevin/microring-studio.git
+cd microring-studio
 pip install -e ".[desktop]"
-openmrr
+microring
 ```
 
 #### 使用 `uv`（极速安装及硬件加速扩展）
 ```bash
-git clone https://github.com/ZhihaoRenKevin/openmrr-studio.git
-cd openmrr-studio
+git clone https://github.com/ZhihaoRenKevin/microring-studio.git
+cd microring-studio
 
 # 普通轻薄本 CPU（Windows / macOS / Linux）：
 uv sync --extra desktop
@@ -143,7 +150,7 @@ uv sync --extra desktop --extra cuda
 # Apple Silicon Mac（启用 AMX + Metal MLX 加速）：
 uv sync --extra desktop --extra apple
 
-uv run openmrr
+uv run microring
 ```
 </details>
 
@@ -175,6 +182,9 @@ python examples/01_devices_and_sweeps/04_lithography_dose_pr_tolerance.py
 # 3d. 纯自研 2D-FEM 有源调谐 (硅 PN / Pockels EO / 热光加热器 + ΔT / E) 与 Lumerical INTERCONNECT 导出：
 python examples/01_devices_and_sweeps/05_active_tuning_pn_eo_to_interconnect.py
 
+# 3e. 零商业软件端面耦合器 (Butt)、二维全波 FDFD 光栅耦合器 (GC) 与超高 Q 收敛诊断：
+python examples/01_devices_and_sweeps/06_butt_gc_couplers_and_high_q_fdtd.py
+
 # 4. 生成单微环版图及 5 器件 MPW 扫参阵列 .gds + KLayout .lyp：
 python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
 
@@ -184,8 +194,8 @@ python examples/02_gds_roundtrip/02_upload_and_simulate_gds.py
 # 6. 实验透射谱拟合（背向散射双峰劈裂 Q_int / Q_ext / 2g 与多 FSR 群折射率提取）：
 python examples/03_lab_spectrum_fitting/01_fit_doublet_and_multifsr.py
 
-# 运行全套 11 项自动化物理与接口验证测试：
-python tests/test_openmrr_all.py
+# 运行全套 12 项自动化物理与接口验证测试：
+python tests/test_microring_all.py
 ```
 
 ---
@@ -204,13 +214,13 @@ python tests/test_openmrr_all.py
 - 聊天框列出自动识别的拓扑、半径、波导宽和耦合间距，点击对应的晶圆膜厚预设（如 `400 nm Si3N4 + Simulate GDS`）即可立刻仿真光谱。
 
 ### 3. 如何接入 `Codex`、`Claude Code` 与本地大模型（单次调用 `< 150 Tokens` + 100% 本地算力）？
-仓库根目录内置 [`AGENTS.md`](../AGENTS.md) 与 [`.mcp.json`](../.mcp.json)，并提供原生 **MCP 协议服务端**（`uv run openmrr mcp`）及极简 **Agent 命令行**（`uv run openmrr agent ...`）：
+仓库根目录内置 [`AGENTS.md`](../AGENTS.md) 与 [`.mcp.json`](../.mcp.json)，并提供原生 **MCP 协议服务端**（`uv run microring mcp`）及极简 **Agent 命令行**（`uv run microring agent ...`）：
 - **重计算全部走本地 CPU / Apple AMX / NVIDIA CUDA + SSD 本征模缓存**：首次求解 2D FEM 后自动写入 `outputs/.mode_cache/`，后续间距/包角/剂量/温升扫参在本地 **`< 0.2 秒`** 完成，零云端算力开销；
 - **拒绝向大模型倾倒长数组（节省 99% Token）**：完整的透射谱 `.csv` 与版图 `.gds`/`.lyp` 直接保存在本地 `outputs/agent_runs/`，返回给 Codex / Claude 的永远是 **`< 150 Tokens` 的单行精炼指标 JSON**（详见 [Codex 与 Claude 极省 Token 接入指南](./tutorials/ai_agents_codex_claude.md)）：
 
 ```bash
-uv run openmrr agent design --top pulley_ap --mat 4H-SiC --h 0.60 --w-ring 1.10 --w-bus 0.82 --fsr 150 --gap 0.24 --cc --gds
-uv run openmrr agent fab-tolerance --mat Si --h 0.22 --w-ring 0.48 --w-bus 0.45 --r 15 --gap 0.18 --resist positive_pr --dose 15 --bias-gds
+uv run microring agent design --top pulley_ap --mat 4H-SiC --h 0.60 --w-ring 1.10 --w-bus 0.82 --fsr 150 --gap 0.24 --cc --gds
+uv run microring agent fab-tolerance --mat Si --h 0.22 --w-ring 0.48 --w-bus 0.45 --r 15 --gap 0.18 --resist positive_pr --dose 15 --bias-gds
 ```
 
 ---
@@ -218,5 +228,5 @@ uv run openmrr agent fab-tolerance --mat Si --h 0.22 --w-ring 0.48 --w-bus 0.45 
 ## 作者、引用与许可证
 
 - **作者**：**Zhihao Ren**（[ORCID: 0000-0002-2520-0784](https://orcid.org/0000-0002-2520-0784)）
-- **学术引用**：若 OpenMRR Studio 对您的科研、流片或教学有所帮助，欢迎通过 GitHub 右侧 *"Cite this repository"* 或 [CITATION.cff](../CITATION.cff) 引用本软件。
+- **学术引用**：若 MicroRing Studio 对您的科研、流片或教学有所帮助，欢迎通过 GitHub 右侧 *"Cite this repository"* 或 [CITATION.cff](../CITATION.cff) 引用本软件。
 - **免责声明与许可证**：本仓库材料模型与默认层号源自公开学术文献，仅供光学设计、教学与流片前快速原型评估；正式流片前请务必使用目标代工厂官方 PDK 与 DRC 规则核验。本项目为独立开源项目，与 Ansys、Synopsys、COMSOL 无隶属或背书关系。代码遵循 [MIT 许可证](../LICENSE) 免费开源发布。

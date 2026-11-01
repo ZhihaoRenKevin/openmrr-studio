@@ -1,5 +1,5 @@
 @echo off
-REM Double-clickable Windows 10/11 Launcher for OpenMRR Studio
+REM Double-clickable Windows 10/11 Launcher for MicroRing Studio
 REM Automatically creates .venv and installs dependencies on first launch if needed.
 setlocal
 cd /d "%~dp0\.."
@@ -9,7 +9,7 @@ if exist ".venv\Scripts\python.exe" goto :launch
 
 where uv >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
-    echo [OpenMRR Studio] First-time setup via uv...
+    echo [MicroRing Studio] First-time setup via uv...
     uv sync --extra desktop
     if exist ".venv\Scripts\python.exe" goto :launch
 )
@@ -27,23 +27,23 @@ if not defined SYS_PY (
 )
 
 if not defined SYS_PY (
-    echo [OpenMRR Studio] Python 3.11 or newer was not found on this PC.
+    echo [MicroRing Studio] Python 3.11 or newer was not found on this PC.
     echo Please install Python 3.12 from https://www.python.org/downloads/windows/
     echo ^(Check "Add python.exe to PATH" during installation^), then double-click this launcher again.
     pause
     exit /b 1
 )
 
-echo [OpenMRR Studio] First-time setup: creating local .venv and installing packages (~1 minute)...
+echo [MicroRing Studio] First-time setup: creating local .venv and installing packages (~1 minute)...
 %SYS_PY% -m venv .venv
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 ".venv\Scripts\pip.exe" install -e ".[desktop]" || ".venv\Scripts\pip.exe" install -e "."
 
 :launch
-".venv\Scripts\python.exe" -m openmrr.desktop_app %*
+".venv\Scripts\python.exe" -m microring.desktop_app %*
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [OpenMRR Studio] Process exited with code %ERRORLEVEL%.
+    echo [MicroRing Studio] Process exited with code %ERRORLEVEL%.
     pause
 )
 endlocal

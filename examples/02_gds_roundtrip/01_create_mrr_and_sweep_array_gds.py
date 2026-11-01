@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import (
+from microring import (
     MRRDesignConfig,
     export_mrr_gds,
     export_sweep_array_gds,

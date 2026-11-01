@@ -3,9 +3,9 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openmrr-studio"
-version = "3.4.0"
-description = "License-free conversational photonics microring designer (Visible 400 nm to Mid-IR 14 um): 2D full-vector Maxwell eigenmodes, native 2D-FEM TO/EO/Si-PN active tuning, Ansys Lumerical INTERCONNECT export, PR dose tolerance, lab spectrum fitting, and bidirectional GDSII bridge without COMSOL or RSoft."
+name = "microring-studio"
+version = "3.5.0"
+description = "License-free Photonic IC and Microring Resonator CAD (Visible 400 nm to Mid-IR 14 um): instant High-Q convergence (10^4 to 10^8+), 2D vector Maxwell eigenmodes, Butt/Edge couplers, 2D-FDFD surface grating couplers, 2D-FEM TO/EO/Si-PN modulators, GDSII masks, and Ansys Lumerical INTERCONNECT export without Lumerical MODE/FDTD, COMSOL, or RSoft."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -13,19 +13,24 @@ authors = [
 ]
 requires-python = ">=3.11"
 keywords = [
+  "photonic-ic",
+  "optical-interconnect",
   "integrated-photonics",
   "microring-resonator",
+  "grating-coupler",
+  "edge-coupler",
+  "butt-coupler",
+  "high-q-resonator",
   "eigenmode-solver",
+  "fdfd",
   "coupled-mode-theory",
   "gdsii",
   "klayout",
-  "lithography",
+  "lumerical-interconnect",
   "silicon-photonics",
   "silicon-nitride",
   "silicon-carbide",
   "lithium-niobate",
-  "visible-photonics",
-  "mid-infrared",
   "mcp-server",
 ]
 classifiers = [
@@ -53,10 +58,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ZhihaoRenKevin/openmrr-studio"
-Repository = "https://github.com/ZhihaoRenKevin/openmrr-studio"
-Documentation = "https://github.com/ZhihaoRenKevin/openmrr-studio#readme"
-Issues = "https://github.com/ZhihaoRenKevin/openmrr-studio/issues"
+Homepage = "https://github.com/ZhihaoRenKevin/microring-studio"
+Repository = "https://github.com/ZhihaoRenKevin/microring-studio"
+Documentation = "https://github.com/ZhihaoRenKevin/microring-studio#readme"
+Issues = "https://github.com/ZhihaoRenKevin/microring-studio/issues"
 Author-ORCID = "https://orcid.org/0000-0002-2520-0784"
 
 [project.optional-dependencies]
@@ -83,10 +88,10 @@ dev = [
 ]
 
 [project.scripts]
-openmrr = "openmrr.cli:main"
+microring = "microring.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openmrr"]
+packages = ["src/microring"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

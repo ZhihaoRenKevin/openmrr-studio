@@ -26,18 +26,26 @@ from .gds_bridge import (
     write_klayout_layer_props,
 )
 from .hardware_accel import detect_hardware_profile, run_compute_benchmark
+from .io_couplers import (
+    design_butt_edge_coupler,
+    design_grating_coupler,
+    export_io_coupler_gds,
+    export_io_coupler_interconnect,
+)
 from .materials import C0_M_PER_S, MATERIAL_CATALOG
 from .mrr_cmt_fit_predict import fit_multi_resonance_spectrum, fit_single_resonance_cmt
 from .mrr_topologies import (
     MRRDesignConfig,
     TOPOLOGY_CATALOG,
+    analyze_high_q_fdtd_convergence,
+    export_coupler_cutout_gds,
     export_mrr_gds,
     get_default_output_root,
     simulate_mrr_topology,
 )
 from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 
-AGENT_OUT_DIR = Path(os.environ.get("OPENMRR_AGENT_OUT", str(get_default_output_root() / "agent_runs")))
+AGENT_OUT_DIR = Path(os.environ.get("MICRORING_AGENT_OUT", str(get_default_output_root() / "agent_runs")))
 
 
 def _cfg_from_dict(d: dict) -> MRRDesignConfig:
@@ -62,6 +70,13 @@ def _cfg_from_dict(d: dict) -> MRRDesignConfig:
         "loss_db_cm": "alpha_loss_db_per_cm",
         "dt_k": "delta_temp_k",
     }
+    _mat_defaults = {
+        "Si3N4": {"film_height_um": 0.40, "ring_width_um": 1.30, "bus_width_um": 1.00, "gap_thru_um": 0.52},
+        "4H-SiC": {"film_height_um": 0.60, "ring_width_um": 1.10, "bus_width_um": 0.82, "gap_thru_um": 0.30},
+        "LN_Xcut": {"film_height_um": 0.60, "slab_height_um": 0.30, "ring_width_um": 1.20, "bus_width_um": 1.00, "gap_thru_um": 0.38},
+        "AlN": {"film_height_um": 0.45, "ring_width_um": 1.10, "bus_width_um": 0.90, "gap_thru_um": 0.35},
+        "Ge": {"film_height_um": 2.00, "ring_width_um": 2.20, "bus_width_um": 2.20, "gap_thru_um": 0.45, "clad_material": "Air", "top_clad_material": "Air"},
+    }
     mapped: dict = {}
     for k, v in d.items():
         if v is None:
@@ -69,6 +84,10 @@ def _cfg_from_dict(d: dict) -> MRRDesignConfig:
         target_k = aliases.get(k, k)
         if target_k in valid:
             mapped[target_k] = v
+    mat_name = mapped.get("core_material")
+    if mat_name in _mat_defaults:
+        for dk, dv in _mat_defaults[mat_name].items():
+            mapped.setdefault(dk, dv)
     if "gap_thru_um" in mapped and "gap_drop_um" not in mapped:
         mapped["gap_drop_um"] = mapped["gap_thru_um"]
     return MRRDesignConfig(**mapped)
@@ -486,4 +505,123 @@ def agent_active_tuning(params: dict) -> dict:
         )
         out["interconnect_zip"] = ic["zip_path"]
     return out
+
+
+def agent_io_coupler(params: dict) -> dict:
+    """Design Butt/Edge Coupler or 2D-FDFD Surface Grating Coupler locally (<150 tokens)."""
+    AGENT_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    ctype = str(params.get("coupler_type") or params.get("type") or "grating_coupler").lower()
+    mat = str(params.get("core_material") or params.get("mat") or "Si")
+    wl = float(params.get("wavelength_nm") or params.get("wl_nm") or 1550.0)
+    h_um = float(params.get("film_height_um") or params.get("h_um") or 0.22)
+    pol = str(params.get("polarization") or params.get("pol") or "TE0")
+    wb = float(params.get("w_bus_um") or 0.48)
+    box_um = float(params.get("box_thickness_um") or params.get("box_um") or 2.0)
+    fib = str(params.get("fiber_preset") or params.get("fiber") or ("Lensed_2p5um" if "butt" in ctype or "edge" in ctype else "SMF28_1550"))
+
+    if "butt" in ctype or "edge" in ctype:
+        res = design_butt_edge_coupler(
+            core_material=mat,
+            wavelength_nm=wl,
+            polarization=pol,
+            film_height_um=h_um,
+            w_bus_um=wb,
+            w_tip_um=float(params["w_tip_um"]) if params.get("w_tip_um") is not None else None,
+            taper_length_um=float(params.get("taper_length_um") or 180.0),
+            taper_profile=str(params.get("taper_profile") or "adiabatic"),
+            fiber_preset=fib,
+            mfd_x_um=float(params["mfd_um"]) if params.get("mfd_um") is not None else None,
+            ar_coating=bool(params.get("ar_coating", True)),
+            box_thickness_um=box_um,
+        )
+        m = res["metrics"]
+        out = {
+            "coupler": "butt_edge",
+            "mat": mat,
+            "fiber": res["fiber_preset"],
+            "w_tip_um": res["w_tip_um"],
+            "w_tip_opt_um": res["w_tip_optimal_um"],
+            "IL_total_dB": m["total_il_db"],
+            "eff_pct": m["total_efficiency_pct"],
+            "RL_dB": m["return_loss_db"],
+            "tol_1dB_xy_um": [m["tol_1db_x_um"], m["tol_1db_y_um"]],
+            "rec_L_taper_um": res["recommended_taper_length_um"],
+            "ms": res["elapsed_ms"],
+        }
+    else:
+        etch_in = params.get("etch_depth_um") if params.get("etch_depth_um") is not None else params.get("etch_um")
+        res = design_grating_coupler(
+            core_material=mat,
+            wavelength_nm=wl,
+            polarization=pol,
+            film_height_um=h_um,
+            etch_depth_um=float(etch_in) if etch_in is not None else None,
+            fiber_angle_deg=float(params.get("fiber_angle_deg") or 10.0),
+            apodized=bool(params.get("apodized", True)),
+            focusing=bool(params.get("focusing", True)),
+            pitch_um=float(params["pitch_um"]) if params.get("pitch_um") is not None else None,
+            num_periods=int(params.get("num_periods") or 26),
+            grating_width_um=float(params.get("grating_width_um") or 12.0),
+            w_bus_um=wb,
+            box_thickness_um=box_um,
+            fiber_preset=fib,
+        )
+        m = res["metrics"]
+        out = {
+            "coupler": "grating_coupler",
+            "mat": mat,
+            "apodized": res["apodized"],
+            "focusing": res["focusing"],
+            "pitch_mean_um": res["synthesis"]["pitch_mean_um"],
+            "etch_um": res["etch_depth_um"],
+            "peak_IL_dB": m["peak_il_db"],
+            "eff_pct": m["peak_efficiency_pct"],
+            "peak_wl_nm": m["peak_wavelength_nm"],
+            "bw_1dB_3dB_nm": [m["bw_1db_nm"], m["bw_3db_nm"]],
+            "S11_dB": m["back_reflection_s11_db"],
+            "ms": res["elapsed_ms"],
+        }
+
+    if params.get("export_gds") or params.get("include_loopback"):
+        ginfo = export_io_coupler_gds(
+            res,
+            AGENT_OUT_DIR / f"io_{res['coupler_type']}_{mat}.gds",
+            include_ring_loopback=bool(params.get("include_loopback", False)),
+        )
+        out["gds"] = ginfo["gds_path"]
+    if params.get("export_interconnect"):
+        ic = export_io_coupler_interconnect(res, AGENT_OUT_DIR / f"io_ic_{res['coupler_type']}_{mat}")
+        out["interconnect_zip"] = ic["zip_path"]
+    return out
+
+
+def agent_high_q_fdtd(params: dict) -> dict:
+    """Diagnose High-Q FDTD non-convergence vs exact infinite-roundtrip TMM + optional coupler cutout GDS (<140 tokens)."""
+    AGENT_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = _cfg_from_dict(params)
+    if params.get("apply_cc"):
+        scout = simulate_mrr_topology(cfg)
+        cc_info = scout["critical_coupling"]
+        cfg = replace(cfg, **{cc_info["parameter"]: float(cc_info["recommended_value"])})
+    hq = analyze_high_q_fdtd_convergence(cfg)
+    out = {
+        "Q_L": int(hq["Q_loaded"]),
+        "FWHM_pm": hq["FWHM_pm"],
+        "tau_ph_ps": hq["photon_lifetime_ps"],
+        "req_FDTD_1e5_ns": hq["required_fdtd_sim_time_1e5_ns"],
+        "req_roundtrips": hq["required_fdtd_roundtrips_1e5"],
+        "coupler_only_ps": hq["coupler_only_fdtd_time_ps"],
+        "speedup_x": int(hq["time_domain_speedup_factor"]),
+        "true_ER_dB": hq["true_converged_er_db"],
+        "truncated_ER_dB": [
+            {"t_ps": t["fdtd_sim_time_ps"], "ER_dB": t["apparent_er_db"]}
+            for t in hq["truncated_fdtd_traces"]
+        ],
+    }
+    if params.get("export_cutout") or params.get("export_cutout_gds"):
+        cut = export_coupler_cutout_gds(cfg, AGENT_OUT_DIR)
+        out["cutout_gds"] = cut["gds_path"]
+        out["cutout_lsf"] = cut["lsf_path"]
+    return out
+
 

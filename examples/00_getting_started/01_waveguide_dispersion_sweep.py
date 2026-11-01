@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import run_waveguide_width_sweep
+from microring import run_waveguide_width_sweep
 
 # ---------------- Top-Level Physical & Geometric Parameters ----------------
 CORE_MATERIAL = "Si3N4"       # LPCVD Silicon Nitride

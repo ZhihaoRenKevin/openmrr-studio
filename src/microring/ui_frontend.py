@@ -1,4 +1,4 @@
-"""Clean, Guided Step-by-Step Conversational UI for `OpenMRR Studio v3.1`.
+"""Clean, Guided Step-by-Step Conversational UI for `MicroRing Studio v3.1`.
 
 Designed for clarity and zero visual overload:
   - Left Panel: Spacious Guided Chatbot asking ONE clear question at a time with clickable cards/chips.
@@ -17,7 +17,7 @@ HTML_APP_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>OpenMRR Studio — Guided Photonics Microring Designer</title>
+<title>MicroRing Studio — Guided Photonics Microring Designer</title>
 <style>
 :root {
   --bg-app: #0b101b;
@@ -381,7 +381,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
   <div class="brand">
     <div class="brand-logo">M</div>
     <div>
-      <div class="brand-title">OpenMRR Studio</div>
+      <div class="brand-title">MicroRing Studio</div>
     </div>
     <span class="hw-pill" id="hw-badge">Detecting...</span>
   </div>
@@ -464,6 +464,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         <button class="stage-pill" id="pill-fit" onclick="setStageView('fit')" data-i18n="pill_fit">📈 Loss &amp; Q Fit</button>
         <button class="stage-pill" id="pill-fab" onclick="setStageView('fab'); if(!lastFabResult) runFabToleranceUI();" data-i18n="pill_fab">🧪 Fab &amp; Dose</button>
         <button class="stage-pill" id="pill-tuning" onclick="setStageView('tuning'); if(!lastTuningResult) runActiveTuningUI();" data-i18n="pill_tuning">⚡ Tuning &amp; IC</button>
+        <button class="stage-pill" id="pill-io" onclick="setStageView('io'); if(!lastIoResult && !lastHighQResult) runIoCouplerUI();" data-i18n="pill_io">🔌 I/O &amp; High-Q</button>
       </div>
       <span class="stage-status" id="spec-status" data-i18n="status_ready">Ready · 400 nm – 14 µm</span>
     </div>
@@ -598,6 +599,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
 
         <div class="action-bar">
           <button class="btn green sm" onclick="sendChatPrompt(currentLang==='zh'?'临界耦合':'Apply critical coupling')" data-i18n="mrr_btn_cc">⚡ Apply Critical Coupling</button>
+          <button class="btn sm" onclick="setStageView('io'); runIoCouplerUI();" data-i18n="mrr_btn_io">🔌 Butt / GC &amp; High-Q</button>
           <button class="btn amber sm" onclick="setStageView('tuning'); runActiveTuningUI();" data-i18n="mrr_btn_tune">🎛️ Active Tuning &amp; INTERCONNECT</button>
           <button class="btn sm" onclick="setStageView('fab'); runFabToleranceUI();" data-i18n="mrr_btn_fab">🧪 Fab / PR Dose Error</button>
           <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描间距':'Sweep gap')" data-i18n="mrr_btn_sw_gap">📏 Sweep Gap</button>
@@ -976,6 +978,111 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         </div>
       </div>
 
+      <!-- ==================== STAGE 8: CHIP I/O COUPLERS (BUTT / 2D-FDFD GC) & HIGH-Q FDTD CONVERGENCE ==================== -->
+      <div class="stage-view" id="view-io">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="io_card_title">License-Free Photonic IC Chip I/O (2D-FDFD Grating &amp; 2D-FEM Butt Coupler) + High-Q FDTD Convergence</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <button class="btn primary sm" onclick="runIoCouplerUI()" data-i18n="io_btn_run">▶ Solve I/O or High-Q</button>
+              <button class="btn sm" id="btn-io-gds-single" onclick="exportIoGdsUI(false)" data-i18n="io_btn_gds">💾 Export Coupler .GDS</button>
+              <button class="btn green sm" id="btn-io-gds-loop" onclick="exportIoGdsUI(true)" data-i18n="io_btn_loop">🔁 127 µm FA + Ring Loopback .GDS</button>
+              <button class="btn amber sm" id="btn-io-ic" onclick="exportIoInterconnectUI()" data-i18n="io_btn_ic">📦 INTERCONNECT SPAR (.ZIP)</button>
+              <button class="btn green sm" id="btn-hq-cutout" style="display:none;" onclick="exportCouplerCutoutUI()" data-i18n="io_btn_cutout">✂️ Export 0.8 ps Coupler Cutout (.GDS+.lsf)</button>
+              <span id="io-download-slot"></span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.8fr 1.5fr repeat(4,1fr);gap:10px;align-items:end;">
+            <div class="field">
+              <label data-i18n="io_lbl_mode">Solver Mode (Zero Lumerical / COMSOL / RSoft)</label>
+              <select id="io-mode" onchange="onIoModeChange()">
+                <option value="grating_coupler" data-i18n="io_opt_gc">Surface Grating Coupler (Bragg + Native 2D Full-Wave FDFD)</option>
+                <option value="butt_edge" data-i18n="io_opt_butt">Butt / Edge Coupler (2D Vector FEM + Poynting Overlap + EME)</option>
+                <option value="high_q_fdtd" data-i18n="io_opt_hq">High-Q Ring-Down Convergence vs Truncated 3D-FDTD</option>
+              </select>
+            </div>
+            <div class="field" id="io-wrap-fiber">
+              <label data-i18n="io_lbl_fiber">Target Optical Fiber / Laser Diode</label>
+              <select id="io-fiber">
+                <option value="SMF28_1550">SMF-28 (1550 nm, MFD 10.4 µm)</option>
+                <option value="Lensed_2p5um">Conical Lensed Fiber (MFD 2.5 µm)</option>
+                <option value="DFB_Laser_Butt">III-V DFB Laser Facet (2.4 × 1.2 µm)</option>
+                <option value="UHNA_3">UHNA-3 High-NA Fiber (MFD 3.3 µm)</option>
+                <option value="Lensed_4p0um">Lensed Fiber (MFD 4.0 µm)</option>
+                <option value="SMF28_1310">SMF-28 O-Band (1310 nm, MFD 9.2 µm)</option>
+                <option value="SMF_Vis780">780HP Visible Fiber (MFD 5.0 µm)</option>
+                <option value="MidIR_InF3">Mid-IR InF3 Fiber (MFD 13.5 µm)</option>
+              </select>
+            </div>
+            <div class="field" id="io-wrap-p1">
+              <label id="io-lbl-p1">Etch Depth [µm]</label>
+              <input id="io-p1" type="number" step="0.01" placeholder="Auto (e.g. 0.07)"/>
+            </div>
+            <div class="field" id="io-wrap-p2">
+              <label id="io-lbl-p2">Fiber Tilt [deg]</label>
+              <input id="io-p2" type="number" step="1" value="10"/>
+            </div>
+            <div class="field" id="io-wrap-p3">
+              <label id="io-lbl-p3">BOX Oxide [µm]</label>
+              <input id="io-p3" type="number" step="0.2" value="2.0"/>
+            </div>
+            <div class="field" id="io-wrap-p4">
+              <label id="io-lbl-p4">Teeth Profile</label>
+              <select id="io-p4">
+                <option value="apod_focus">Apodized + Focusing</option>
+                <option value="unif_focus">Uniform + Focusing</option>
+                <option value="apod_linear">Apodized + Linear</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="io-banner" style="margin-top:10px;padding:9px 12px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.28);font-size:12px;color:#cbd5e1;line-height:1.5;">
+            Synthesizes Bragg / Gaussian-apodized teeth and solves full-wave 2D Maxwell Frequency-Domain Finite-Difference (<code>2D FDFD</code> with <code>UPML</code>) across etched grooves, top oxide, <code>BOX</code>, and bottom Si substrate.
+          </div>
+        </div>
+
+        <div class="kpi-row four">
+          <div class="kpi-card">
+            <div class="kpi-lbl" id="io-kpi1-lbl">Peak Insertion Loss</div>
+            <div class="kpi-val green" id="io-kpi1-val">--</div>
+            <div class="kpi-sub" id="io-kpi1-sub">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" id="io-kpi2-lbl">1-dB / 3-dB Bandwidth</div>
+            <div class="kpi-val cyan" id="io-kpi2-val">--</div>
+            <div class="kpi-sub" id="io-kpi2-sub">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" id="io-kpi3-lbl">Synthesized Geometry</div>
+            <div class="kpi-val amber" id="io-kpi3-val">--</div>
+            <div class="kpi-sub" id="io-kpi3-sub">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" id="io-kpi4-lbl">Return Loss / Directionality</div>
+            <div class="kpi-val" id="io-kpi4-val">--</div>
+            <div class="kpi-sub" id="io-kpi4-sub">--</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" id="io-plot1-title">Broadband Coupling Insertion Loss IL(λ) &amp; Reflection S11</span>
+              <span class="card-sub" id="io-plot1-sub">2D Full-Wave Maxwell FDFD</span>
+            </div>
+            <canvas class="plot-cv" id="cv-io-main"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" id="io-plot2-title">2D Full-Wave Radiated Electric Field |E(z, y)|</span>
+              <span class="card-sub" id="io-plot2-sub">Guided Launch → Upward Tilted SMF Beam</span>
+            </div>
+            <canvas class="plot-cv" id="cv-io-aux"></canvas>
+          </div>
+        </div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -1066,7 +1173,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
 
 <script>
 // ==================== GLOBAL STATE & BILINGUAL I18N ====================
-let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('openmrr_lang')) || 'en';
+let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('microring_lang')) || 'en';
 let copilotSession = null;
 let catalogMaterials = [];
 let catalogTopologies = {};
@@ -1079,6 +1186,9 @@ let labSpectrumData = null;
 let lastExtractedLossDbCm = null;
 let lastFabResult = null;
 let lastTuningResult = null;
+let lastIoResult = null;
+let lastHighQResult = null;
+let ioBusy = false;
 let aiBackendStatus = { offline: true, ollama_available: false, claude_cli_available: false, claude_env_key: false, codex_cli_available: false, codex_env_key: false };
 
 const UI_I18N = {
@@ -1093,7 +1203,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 Online · Codex / OpenAI (CLI / API)',
     chat_placeholder: "Type an answer or spec (e.g. 'loss = 0.8 dB/cm, FSR 150 GHz, pulley')...",
     btn_send: 'Send →',
-    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit', pill_fab: '🧪 Fab & Dose', pill_tuning: '⚡ Tuning & IC',
+    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit', pill_fab: '🧪 Fab & Dose', pill_tuning: '⚡ Tuning & IC', pill_io: '🔌 Butt/GC & High-Q',
     status_ready: 'Ready · 400 nm – 14 µm',
     wf1_title: '1. Design a New Ring Step-by-Step',
     wf1_desc: 'Answer one simple question at a time — waveband, material, wafer stack, propagation loss (<code>dB/cm</code>), and target FSR.',
@@ -1107,7 +1217,7 @@ const UI_I18N = {
     mode_lbl_sm: 'Single-Mode Max Width', mode_lbl_wbus: 'Recommended Bus W', mode_lbl_wring: 'Recommended Ring W', mode_lbl_neff: 'Fundamental Mode',
     mode_card_field: '2D Vector Eigenmode Field', mode_card_cutoff: 'Waveguide Width Dispersion & Cutoff',
     mrr_lbl_fsr: 'Free Spectral Range', mrr_lbl_loss: 'Prop. Loss α & Q_int', mrr_lbl_ql: 'Loaded Q Factor', mrr_lbl_er: 'Extinction Ratio', mrr_lbl_cc: 'Critical Coupling',
-    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_tune: '🎛️ Active Tuning & INTERCONNECT', mrr_btn_fab: '🧪 Fab / PR Dose Error', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
+    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_io: '🔌 Butt / GC & High-Q', mrr_btn_tune: '🎛️ Active Tuning & INTERCONNECT', mrr_btn_fab: '🧪 Fab / PR Dose Error', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
     mrr_btn_gds: '💾 Export .GDS Mask', mrr_btn_csv: '📥 Download Spectrum .CSV',
     mrr_card_spec: 'Broadband Transmission Spectrum', mrr_card_coupler: 'Coupler Critical-Coupling Synthesis', mrr_card_schem: 'Resonator & Cross-Section Schematic',
     gds_btn_up: '📂 Upload .GDS / .OAS', gds_btn_single: '💾 Generate Single .GDS', gds_btn_array: '🗂️ Generate 5-Ring Sweep Array .GDS',
@@ -1148,7 +1258,18 @@ const UI_I18N = {
     tune_kpi1: 'Device Tuning Slope', tune_kpi2: 'π-Phase-Shift Figure', tune_kpi3: '3-dB Modulation BW', tune_kpi4: '2D-FEM Geometry Coupling',
     tune_plot1_title: 'Multi-State Transmission Spectra (V / I / ΔT / E)',
     tune_plot2_title: 'Resonance Shift Δλ [pm] & Active Loss α [dB/cm]',
-    tune_tbl_title: 'State-by-State Perturbed 2D-FEM Eigenmode & Resonance Breakdown'
+    tune_tbl_title: 'State-by-State Perturbed 2D-FEM Eigenmode & Resonance Breakdown',
+    io_card_title: 'License-Free Photonic IC Chip I/O (2D-FDFD Grating & 2D-FEM Butt Coupler) + High-Q FDTD Convergence',
+    io_btn_run: '▶ Solve I/O or High-Q',
+    io_btn_gds: '💾 Export Coupler .GDS',
+    io_btn_loop: '🔁 127 µm FA + Ring Loopback .GDS',
+    io_btn_ic: '📦 INTERCONNECT SPAR (.ZIP)',
+    io_btn_cutout: '✂️ Export 0.8 ps Coupler Cutout (.GDS+.lsf)',
+    io_lbl_mode: 'Solver Mode (Zero Lumerical / COMSOL / RSoft)',
+    io_opt_gc: 'Surface Grating Coupler (Bragg + Native 2D Full-Wave FDFD)',
+    io_opt_butt: 'Butt / Edge Coupler (2D Vector FEM + Poynting Overlap + EME)',
+    io_opt_hq: 'High-Q Ring-Down Convergence vs Truncated 3D-FDTD',
+    io_lbl_fiber: 'Target Optical Fiber / Laser Diode'
   },
   zh: {
     step1: '选择目标', step2: '工作波段', step3: '芯层材料', step4: '叠层与模式', step5: '损耗与微环', step6: '耦合优化与版图',
@@ -1161,7 +1282,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 在线模式 · Codex / OpenAI (CLI / API)',
     chat_placeholder: '输入您的需求或参数（例如：损耗 0.8 dB/cm, FSR 150 GHz, 滑轮耦合）...',
     btn_send: '发送 →',
-    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合', pill_fab: '🧪 工艺与剂量', pill_tuning: '⚡ 调谐与 IC',
+    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合', pill_fab: '🧪 工艺与剂量', pill_tuning: '⚡ 调谐与 IC', pill_io: '🔌 端面/光栅与高Q',
     status_ready: '就绪 · 400 nm – 14 µm',
     wf1_title: '1. 逐步引导设计新微环',
     wf1_desc: '每次只问一个清晰问题——工作波段、波导材料、晶圆叠层、传播损耗 (<code>dB/cm</code>) 与目标 FSR。',
@@ -1175,7 +1296,7 @@ const UI_I18N = {
     mode_lbl_sm: '单模最大截止宽度', mode_lbl_wbus: '推荐直波导宽 W_bus', mode_lbl_wring: '推荐微环宽 W_ring', mode_lbl_neff: '基模有效折射率',
     mode_card_field: '二维全矢量本征模场分布', mode_card_cutoff: '波导宽度色散与单模截止曲线',
     mrr_lbl_fsr: '自由光谱范围 FSR', mrr_lbl_loss: '传播损耗 α 与本征 Q', mrr_lbl_ql: '有载品质因数 Q_L', mrr_lbl_er: '谐振消光比 ER', mrr_lbl_cc: '临界耦合目标参数',
-    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_tune: '🎛️ 有源调谐与 INTERCONNECT', mrr_btn_fab: '🧪 正/负胶曝光容差', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
+    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_io: '🔌 端面/光栅耦合与高Q', mrr_btn_tune: '🎛️ 有源调谐与 INTERCONNECT', mrr_btn_fab: '🧪 正/负胶曝光容差', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
     mrr_btn_gds: '💾 导出 .GDS 掩膜版图', mrr_btn_csv: '📥 下载光谱 .CSV',
     mrr_card_spec: '宽谱透射与下载光谱', mrr_card_coupler: '耦合器临界耦合综合曲线', mrr_card_schem: '微环拓扑与波导截面示意图',
     gds_btn_up: '📂 上传 .GDS / .OAS', gds_btn_single: '💾 生成单器件 .GDS', gds_btn_array: '🗂️ 生成 5 环容差阵列 .GDS',
@@ -1216,7 +1337,18 @@ const UI_I18N = {
     tune_kpi1: '器件调谐效率斜率', tune_kpi2: 'π 相移关键指标', tune_kpi3: '3-dB 电光/热光带宽', tune_kpi4: '2D-FEM 截面多物理耦合',
     tune_plot1_title: '多偏置 / 多温度 / 多电场透射光谱簇',
     tune_plot2_title: '谐振漂移 Δλ [pm] 与有源模态损耗 α [dB/cm]',
-    tune_tbl_title: '逐状态微扰 2D-FEM 本征模与谐振指标明细表'
+    tune_tbl_title: '逐状态微扰 2D-FEM 本征模与谐振指标明细表',
+    io_card_title: '零商业软件光子芯片 I/O 耦合 (2D-FDFD 光栅与 2D-FEM 端面耦合器) + 超高 Q 值 FDTD 收敛引擎',
+    io_btn_run: '▶ 求解耦合器或高Q收敛',
+    io_btn_gds: '💾 导出耦合器 .GDS',
+    io_btn_loop: '🔁 127 µm 光纤阵列 + 微环回环 .GDS',
+    io_btn_ic: '📦 INTERCONNECT S参数 (.ZIP)',
+    io_btn_cutout: '✂️ 导出单次耦合区切片 (.GDS+.lsf)',
+    io_lbl_mode: '求解模式 (零 Lumerical / COMSOL / RSoft)',
+    io_opt_gc: '表面光栅耦合器 (Bragg 变迹综合 + 原生二维全波 FDFD)',
+    io_opt_butt: '端面模斑转换耦合器 (2D 全矢量 FEM + 复坡印廷重叠 + EME)',
+    io_opt_hq: '超高 Q 值谐振振铃收敛诊断 vs 截断 3D-FDTD',
+    io_lbl_fiber: '目标光纤 / 半导体激光器模斑'
   }
 };
 
@@ -1253,7 +1385,7 @@ function applyUiTranslations() {
 
 async function setLanguage(lang) {
   currentLang = (lang === 'zh') ? 'zh' : 'en';
-  try { localStorage.setItem('openmrr_lang', currentLang); } catch (_) {}
+  try { localStorage.setItem('microring_lang', currentLang); } catch (_) {}
   applyUiTranslations();
 
   if (!copilotSession || (copilotSession.stage === 'welcome' && (copilotSession.history || []).length <= 1)) {
@@ -1278,7 +1410,7 @@ async function setLanguage(lang) {
 let gdsCam = { scale: 1.0, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0, hiddenLayers: {} };
 const LAYER_COLORS = {
   '1/0': '#38bdf8', '2/0': '#0284c7', '3/0': '#a78bfa', '4/0': '#f43f5e',
-  '10/0': '#f59e0b', '11/0': '#eab308', '65/0': '#34d399', '66/0': '#cbd5e1', '68/0': '#475569'
+  '10/0': '#f59e0b', '11/0': '#eab308', '40/0': '#fb7185', '65/0': '#34d399', '66/0': '#cbd5e1', '68/0': '#475569'
 };
 
 // ==================== UI NAVIGATION & STEPPER ====================
@@ -1300,6 +1432,12 @@ function setStageView(viewName) {
     if (viewName === 'fit' && labSpectrumData) runCmtFitUI();
     if (viewName === 'fab' && lastFabResult) renderFabResult(lastFabResult);
     if (viewName === 'tuning' && lastTuningResult) renderTuningResult(lastTuningResult);
+    if (viewName === 'io') {
+      const m = document.getElementById('io-mode').value;
+      if (m === 'high_q_fdtd' && lastHighQResult) renderHighQResult(lastHighQResult);
+      else if (m !== 'high_q_fdtd' && lastIoResult) renderIoResult(lastIoResult);
+      else if (!ioBusy) runIoCouplerUI();
+    }
   }, 25);
 }
 
@@ -1521,12 +1659,12 @@ async function sendUserChat() {
 
 function saveSessionApiKey(val) {
   const mode = document.getElementById('ai-mode-select').value;
-  try { sessionStorage.setItem('openmrr_key_' + mode, val.trim()); } catch (_) {}
+  try { sessionStorage.setItem('microring_key_' + mode, val.trim()); } catch (_) {}
   updateAiModeBadge();
 }
 
 function getSessionApiKey(mode) {
-  try { return sessionStorage.getItem('openmrr_key_' + mode) || ''; } catch (_) { return ''; }
+  try { return sessionStorage.getItem('microring_key_' + mode) || ''; } catch (_) { return ''; }
 }
 
 function toggleAiKeyBox(forceOpen) {
@@ -1646,6 +1784,18 @@ async function sendChatPrompt(promptText) {
     if (data.tuning_result) {
       lastTuningResult = data.tuning_result;
       renderTuningResult(data.tuning_result);
+    }
+    if (data.io_result) {
+      lastIoResult = data.io_result;
+      document.getElementById('io-mode').value = data.io_result.coupler_type || 'grating_coupler';
+      onIoModeChange(true);
+      renderIoResult(data.io_result);
+    }
+    if (data.high_q_result) {
+      lastHighQResult = data.high_q_result;
+      document.getElementById('io-mode').value = 'high_q_fdtd';
+      onIoModeChange(true);
+      renderHighQResult(data.high_q_result);
     }
     if (data.interconnect_export && data.interconnect_export.zip_download_url) {
       showInterconnectDownload(data.interconnect_export);
@@ -2041,14 +2191,24 @@ function setGdsView(gdsInfo) {
   currentGdsView = gdsInfo;
   gdsCam.hiddenLayers = {};
   const ext = gdsInfo.extracted_geometry;
-  document.getElementById('gds-extracted-box').innerHTML = `
-    <div style="line-height:1.6;">
-      <strong>${currentLang === 'zh' ? '文件' : 'File'}</strong>: <code>${gdsInfo.file_name}</code> (Cell: <code>${gdsInfo.cell_name}</code>, Layer: <code>${gdsInfo.selected_core_layer.join('/')}</code>) &nbsp;|&nbsp;
-      <strong>${currentLang === 'zh' ? '识别拓扑' : 'Detected'}</strong>: <span style="color:#38bdf8;font-weight:700;">${ext.topology_display}</span> (${ext.ports_detected}-Port)<br/>
-      <strong>${currentLang === 'zh' ? '多边形测量参数' : 'Measured Polygons'}</strong>: R = <code>${ext.ring_radius_um} µm</code> · W_ring = <code>${ext.ring_width_um} µm</code> · W_bus = <code>${ext.bus_width_um} µm</code> · gap = <strong style="color:#34d399;">${(ext.gap_thru_um*1000).toFixed(1)} nm</strong>
-      ${ext.straight_length_um > 0 ? ` · L_s = <code>${ext.straight_length_um} µm</code>` : ''}
-      ${ext.topology.includes('pulley') ? ` · θ = <code>${ext.pulley_angle_thru_deg}°</code>` : ''}
-    </div>`;
+  if (ext.is_non_ring) {
+    document.getElementById('gds-extracted-box').innerHTML = `
+      <div style="line-height:1.6;">
+        <strong>${currentLang === 'zh' ? '文件' : 'File'}</strong>: <code>${gdsInfo.file_name}</code> (Cell: <code>${gdsInfo.cell_name}</code>, Layer: <code>${gdsInfo.selected_core_layer.join('/')}</code>) &nbsp;|&nbsp;
+        <strong>${currentLang === 'zh' ? '器件类型' : 'Component'}</strong>: <span style="color:#38bdf8;font-weight:700;">${ext.topology_display}</span> (${ext.ports_detected}-Port)<br/>
+        <strong>${currentLang === 'zh' ? '版图尺寸' : 'Footprint'}</strong>: <code>${ext.footprint_x_um} × ${ext.footprint_y_um} µm</code>
+        ${ext.gap_thru_um > 0 ? ` · <strong>gap</strong> = <strong style="color:#34d399;">${(ext.gap_thru_um*1000).toFixed(1)} nm</strong>` : ''}
+      </div>`;
+  } else {
+    document.getElementById('gds-extracted-box').innerHTML = `
+      <div style="line-height:1.6;">
+        <strong>${currentLang === 'zh' ? '文件' : 'File'}</strong>: <code>${gdsInfo.file_name}</code> (Cell: <code>${gdsInfo.cell_name}</code>, Layer: <code>${gdsInfo.selected_core_layer.join('/')}</code>) &nbsp;|&nbsp;
+        <strong>${currentLang === 'zh' ? '识别拓扑' : 'Detected'}</strong>: <span style="color:#38bdf8;font-weight:700;">${ext.topology_display}</span> (${ext.ports_detected}-Port)<br/>
+        <strong>${currentLang === 'zh' ? '多边形测量参数' : 'Measured Polygons'}</strong>: R = <code>${ext.ring_radius_um} µm</code> · W_ring = <code>${ext.ring_width_um} µm</code> · W_bus = <code>${ext.bus_width_um} µm</code> · gap = <strong style="color:#34d399;">${(ext.gap_thru_um*1000).toFixed(1)} nm</strong>
+        ${ext.straight_length_um > 0 ? ` · L_s = <code>${ext.straight_length_um} µm</code>` : ''}
+        ${ext.topology.includes('pulley') ? ` · θ = <code>${ext.pulley_angle_thru_deg}°</code>` : ''}
+      </div>`;
+  }
 
   const pills = document.getElementById('gds-layer-pills');
   pills.innerHTML = '';
@@ -2317,7 +2477,7 @@ function exportSpectrumCSV() {
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'openmrr_spectrum.csv';
+  a.download = 'microring_spectrum.csv';
   a.click();
 }
 
@@ -2670,9 +2830,14 @@ async function runActiveTuningUI() {
 }
 
 function showInterconnectDownload(ic) {
+  if (!ic || !ic.zip_download_url) return;
+  const html = `<a class="btn amber sm" href="${ic.zip_download_url}" download>⬇ ${ic.zip_name || 'INTERCONNECT.zip'}</a>`;
   const slot = document.getElementById('ic-download-slot');
-  if (!slot || !ic || !ic.zip_download_url) return;
-  slot.innerHTML = `<a class="btn amber sm" href="${ic.zip_download_url}" download>⬇ ${ic.zip_name || 'INTERCONNECT.zip'}</a>`;
+  if (slot) slot.innerHTML = html;
+  const ioSlot = document.getElementById('io-download-slot');
+  if (ioSlot && (String(ic.zip_name || '').includes('IO_INTERCONNECT') || document.getElementById('view-io').classList.contains('active'))) {
+    ioSlot.innerHTML = html;
+  }
 }
 
 async function exportInterconnectUI() {
@@ -2696,7 +2861,7 @@ async function exportInterconnectUI() {
     if (ic.zip_download_url) {
       const a = document.createElement('a');
       a.href = ic.zip_download_url;
-      a.download = ic.zip_name || 'OpenMRR_INTERCONNECT.zip';
+      a.download = ic.zip_name || 'MicroRing_INTERCONNECT.zip';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -2951,6 +3116,491 @@ function drawTuningShiftLoss(res) {
 
   ctx.textAlign = 'left'; ctx.fillStyle = '#f59e0b';
   [lmin, 0.5 * (lmin + lmax), lmax].forEach(v => ctx.fillText(v.toFixed(1) + ' dB/cm', pad.l + pw + 5, tyL(v) + 3.5));
+}
+
+// ==================== STAGE 8: CHIP I/O COUPLERS (2D-FDFD GC / 2D-FEM BUTT) & HIGH-Q FDTD CONVERGENCE ====================
+function onIoModeChange(skipRun = false) {
+  const mode = document.getElementById('io-mode').value;
+  const zh = currentLang === 'zh';
+  const wrapFiber = document.getElementById('io-wrap-fiber');
+  const fibSel = document.getElementById('io-fiber');
+  const btnGds = document.getElementById('btn-io-gds-single');
+  const btnLoop = document.getElementById('btn-io-gds-loop');
+  const btnIc = document.getElementById('btn-io-ic');
+  const btnCut = document.getElementById('btn-hq-cutout');
+
+  const lbl1 = document.getElementById('io-lbl-p1'), inp1 = document.getElementById('io-p1');
+  const lbl2 = document.getElementById('io-lbl-p2'), inp2 = document.getElementById('io-p2');
+  const lbl3 = document.getElementById('io-lbl-p3'), inp3 = document.getElementById('io-p3');
+  const lbl4 = document.getElementById('io-lbl-p4'), sel4 = document.getElementById('io-p4');
+
+  if (mode === 'grating_coupler') {
+    wrapFiber.style.display = '';
+    btnGds.style.display = '';
+    btnLoop.style.display = '';
+    btnIc.style.display = '';
+    btnCut.style.display = 'none';
+    if (fibSel.value === 'Lensed_2p5um' || fibSel.value === 'DFB_Laser_Butt') fibSel.value = 'SMF28_1550';
+    lbl1.textContent = zh ? '浅刻蚀深度 [µm]' : 'Etch Depth [µm]';
+    inp1.value = ''; inp1.step = '0.01'; inp1.placeholder = 'Auto (e.g. 0.07)';
+    lbl2.textContent = zh ? '光纤倾角 [°]' : 'Fiber Tilt [deg]';
+    inp2.value = '10'; inp2.step = '1';
+    lbl3.textContent = zh ? '埋氧层 BOX [µm]' : 'BOX Oxide [µm]';
+    inp3.value = '2.0'; inp3.step = '0.2';
+    lbl4.textContent = zh ? '光栅齿型' : 'Teeth Profile';
+    sel4.innerHTML = zh
+      ? '<option value="apod_focus">变迹切趾 + 聚焦弯齿</option><option value="unif_focus">均匀周期 + 聚焦弯齿</option><option value="apod_linear">变迹切趾 + 直齿</option>'
+      : '<option value="apod_focus">Apodized + Focusing</option><option value="unif_focus">Uniform + Focusing</option><option value="apod_linear">Apodized + Linear</option>';
+  } else if (mode === 'butt_edge') {
+    wrapFiber.style.display = '';
+    btnGds.style.display = '';
+    btnLoop.style.display = '';
+    btnIc.style.display = '';
+    btnCut.style.display = 'none';
+    if (fibSel.value === 'SMF28_1550') fibSel.value = 'Lensed_2p5um';
+    lbl1.textContent = zh ? '尖端宽 W_tip [µm]' : 'Tip Width W_tip [µm]';
+    inp1.value = ''; inp1.step = '0.01'; inp1.placeholder = zh ? '自动优选' : 'Auto Optimize';
+    lbl2.textContent = zh ? '锥长 L_taper [µm]' : 'Taper Len [µm]';
+    inp2.value = '180'; inp2.step = '10';
+    lbl3.textContent = zh ? '埋氧层 BOX [µm]' : 'BOX Oxide [µm]';
+    inp3.value = '2.0'; inp3.step = '0.2';
+    lbl4.textContent = zh ? '锥形与增透膜' : 'Taper & Facet';
+    sel4.innerHTML = zh
+      ? '<option value="adiabatic_ar">绝热锥 + AR 增透膜</option><option value="linear_ar">线性锥 + AR 增透膜</option><option value="adiabatic_air">绝热锥 + 裸端面无膜</option>'
+      : '<option value="adiabatic_ar">Adiabatic + AR Coated</option><option value="linear_ar">Linear + AR Coated</option><option value="adiabatic_air">Adiabatic + Bare Facet</option>';
+  } else {
+    wrapFiber.style.display = 'none';
+    btnGds.style.display = 'none';
+    btnLoop.style.display = 'none';
+    btnIc.style.display = 'none';
+    btnCut.style.display = '';
+    const cfg = readConfigFromForm();
+    lbl1.textContent = zh ? '传播损耗 α [dB/cm]' : 'Prop. Loss α [dB/cm]';
+    inp1.value = (cfg.alpha_loss_db_per_cm !== null && cfg.alpha_loss_db_per_cm <= 0.5) ? String(cfg.alpha_loss_db_per_cm) : '0.08';
+    inp1.step = '0.02'; inp1.placeholder = '0.08';
+    lbl2.textContent = zh ? '微环半径 R [µm]' : 'Radius R [µm]';
+    inp2.value = String(cfg.ring_radius_um || 80); inp2.step = '5';
+    lbl3.textContent = zh ? '耦合间距 [µm]' : 'Coupler Gap [µm]';
+    inp3.value = String(Math.max(cfg.gap_thru_um || 0.35, 0.28)); inp3.step = '0.02';
+    lbl4.textContent = zh ? 'FDTD 截断时间 [ps]' : 'FDTD Cutoffs [ps]';
+    sel4.innerHTML = '<option value="10, 50, 250, 1000">10 / 50 / 250 / 1000 ps</option><option value="25, 100, 500, 2500">25 / 100 / 500 / 2500 ps</option><option value="5, 20, 100, 400">5 / 20 / 100 / 400 ps</option>';
+  }
+  if (!skipRun) runIoCouplerUI();
+}
+
+function buildIoPayload() {
+  const cfg = readConfigFromForm();
+  const mode = document.getElementById('io-mode').value;
+  const p1Raw = document.getElementById('io-p1').value;
+  const p2Val = parseFloat(document.getElementById('io-p2').value);
+  const p3Val = parseFloat(document.getElementById('io-p3').value);
+  const p4Val = document.getElementById('io-p4').value;
+
+  if (mode === 'high_q_fdtd') {
+    const hqCfg = Object.assign({}, cfg, {
+      alpha_loss_db_per_cm: Number.isFinite(parseFloat(p1Raw)) ? parseFloat(p1Raw) : 0.08,
+      ring_radius_um: Number.isFinite(p2Val) ? p2Val : (cfg.ring_radius_um || 80),
+      gap_thru_um: Number.isFinite(p3Val) ? p3Val : 0.36
+    });
+    return { config: hqCfg, sim_times_ps: p4Val || '10, 50, 250, 1000' };
+  }
+
+  let mat = cfg.core_material || 'Si';
+  let hUm = cfg.film_height_um || 0.22;
+  let wBus = cfg.bus_width_um || 0.48;
+  // Note: for default Si3N4 blueprint when opening GC for the first time, Si 220 nm SOI or current platform both work natively!
+  if (mode === 'grating_coupler') {
+    return {
+      coupler_type: 'grating_coupler',
+      core_material: mat,
+      clad_material: cfg.clad_material || 'SiO2',
+      top_clad_material: cfg.top_clad_material || 'SiO2',
+      wavelength_nm: cfg.wavelength_nm || 1550,
+      polarization: cfg.polarization || 'TE0',
+      film_height_um: hUm,
+      w_bus_um: wBus,
+      etch_depth_um: p1Raw === '' ? null : parseFloat(p1Raw),
+      fiber_angle_deg: Number.isFinite(p2Val) ? p2Val : 10.0,
+      box_thickness_um: Number.isFinite(p3Val) ? p3Val : 2.0,
+      apodized: p4Val !== 'unif_focus',
+      focusing: p4Val !== 'apod_linear',
+      fiber_preset: document.getElementById('io-fiber').value || 'SMF28_1550',
+      ring_config: cfg
+    };
+  }
+  return {
+    coupler_type: 'butt_edge',
+    core_material: mat,
+    clad_material: cfg.clad_material || 'SiO2',
+    top_clad_material: cfg.top_clad_material || 'SiO2',
+    wavelength_nm: cfg.wavelength_nm || 1550,
+    polarization: cfg.polarization || 'TE0',
+    film_height_um: hUm,
+    slab_height_um: cfg.slab_height_um || 0.0,
+    sidewall_deg: cfg.sidewall_deg || 88.0,
+    w_bus_um: wBus,
+    w_tip_um: p1Raw === '' ? null : parseFloat(p1Raw),
+    taper_length_um: Number.isFinite(p2Val) ? p2Val : 180.0,
+    box_thickness_um: Number.isFinite(p3Val) ? p3Val : 2.0,
+    taper_profile: p4Val === 'linear_ar' ? 'linear' : 'adiabatic',
+    ar_coating: p4Val !== 'adiabatic_air',
+    fiber_preset: document.getElementById('io-fiber').value || 'Lensed_2p5um',
+    ring_config: cfg
+  };
+}
+
+async function runIoCouplerUI() {
+  if (ioBusy) return;
+  ioBusy = true;
+  const mode = document.getElementById('io-mode').value;
+  const payload = buildIoPayload();
+  const zh = currentLang === 'zh';
+  document.getElementById('spec-status').textContent = mode === 'high_q_fdtd'
+    ? (zh ? '正在求解超高 Q 无限圈精确谱 vs FDTD 截断振铃...' : 'Solving exact M->inf High-Q resonance vs truncated FDTD...')
+    : (mode === 'grating_coupler'
+      ? (zh ? '正在求解 2D 全波 Maxwell FDFD 光栅耦合器...' : 'Solving 2D Full-Wave Maxwell FDFD Grating Coupler...')
+      : (zh ? '正在求解 2D 全矢量 FEM 端面模斑耦合器...' : 'Solving 2D Vector FEM Butt/Edge Coupler...'));
+  try {
+    const url = mode === 'high_q_fdtd' ? '/api/high_q_fdtd' : '/api/io_coupler';
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (data.error) {
+      document.getElementById('io-banner').innerHTML = `<span style="color:#f87171;">⚠️ ${data.error}</span>`;
+      document.getElementById('spec-status').textContent = 'Solver notice';
+      return;
+    }
+    if (mode === 'high_q_fdtd') {
+      lastHighQResult = data;
+      renderHighQResult(data);
+      document.getElementById('spec-status').textContent = zh
+        ? `超高 Q 收敛诊断完成 (Q_L = ${ Number(data.Q_loaded).toLocaleString() })`
+        : `High-Q Solved (Q_L = ${ Number(data.Q_loaded).toLocaleString() })`;
+    } else {
+      lastIoResult = data;
+      renderIoResult(data);
+      document.getElementById('spec-status').textContent = zh
+        ? `I/O 耦合求解完成 (${data.elapsed_ms} ms)`
+        : `I/O Coupler Solved in ${data.elapsed_ms} ms`;
+    }
+  } catch (err) {
+    document.getElementById('spec-status').textContent = 'Error: ' + err;
+  } finally {
+    ioBusy = false;
+  }
+}
+
+async function exportIoGdsUI(loopback) {
+  const payload = buildIoPayload();
+  if (lastIoResult && lastIoResult.coupler_type === payload.coupler_type && lastIoResult.core_material === payload.core_material) {
+    payload.coupler_result = lastIoResult;
+  }
+  payload.include_ring_loopback = !!loopback;
+  document.getElementById('spec-status').textContent = currentLang === 'zh' ? '正在生成 GDSII 掩膜版图...' : 'Generating Coupler GDSII mask...';
+  try {
+    const r = await fetch('/api/export_io_gds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const res = await r.json();
+    if (res.error) { alert('GDS Export Error: ' + res.error); return; }
+    document.getElementById('io-download-slot').innerHTML =
+      `<a class="btn green sm" href="${res.gds_download_url}" download>⬇ .GDS</a> ` +
+      `<a class="btn sm" href="${res.lyp_download_url}" download>⬇ .LYP</a>`;
+    showGdsExportResult(res);
+    setStageView('gds');
+  } catch (err) {
+    alert('GDS export failed: ' + err);
+  }
+}
+
+async function exportIoInterconnectUI() {
+  const payload = buildIoPayload();
+  if (lastIoResult && lastIoResult.coupler_type === payload.coupler_type && lastIoResult.core_material === payload.core_material) {
+    payload.coupler_result = lastIoResult;
+  }
+  document.getElementById('spec-status').textContent = currentLang === 'zh' ? '正在导出耦合器 INTERCONNECT S 参数...' : 'Exporting Coupler INTERCONNECT SPAR...';
+  try {
+    const r = await fetch('/api/export_io_interconnect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const ic = await r.json();
+    if (ic.error) { alert('INTERCONNECT Export Error: ' + ic.error); return; }
+    showInterconnectDownload(ic);
+    if (ic.zip_download_url) {
+      const a = document.createElement('a');
+      a.href = ic.zip_download_url;
+      a.download = ic.zip_name || 'MicroRing_IO_INTERCONNECT.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  } catch (err) {
+    alert('INTERCONNECT export failed: ' + err);
+  }
+}
+
+async function exportCouplerCutoutUI() {
+  const payload = buildIoPayload();
+  payload.export_cutout = true;
+  document.getElementById('spec-status').textContent = currentLang === 'zh' ? '正在导出单程耦合区 FDTD 切片...' : 'Exporting single-pass Coupler Cutout (.GDS + .lsf)...';
+  try {
+    const r = await fetch('/api/high_q_fdtd', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (data.error) { alert('Cutout Export Error: ' + data.error); return; }
+    lastHighQResult = data;
+    renderHighQResult(data);
+    if (data.cutout) {
+      document.getElementById('io-download-slot').innerHTML =
+        `<a class="btn green sm" href="${data.cutout.gds_download_url}" download>⬇ Cutout .GDS</a> ` +
+        `<a class="btn amber sm" href="${data.cutout.lsf_download_url}" download>⬇ Lumerical .lsf</a>`;
+      if (data.cutout.gds_view) setGdsView(data.cutout.gds_view);
+    }
+  } catch (err) {
+    alert('Cutout export failed: ' + err);
+  }
+}
+
+function renderIoResult(res) {
+  if (!res || !res.metrics) return;
+  const zh = currentLang === 'zh';
+  const mt = res.metrics;
+
+  if (res.coupler_type === 'grating_coupler') {
+    const sy = res.synthesis || {};
+    document.getElementById('io-kpi1-lbl').textContent = zh ? '峰值插入损耗 IL' : 'Peak Insertion Loss';
+    document.getElementById('io-kpi1-val').textContent = `${mt.peak_il_db.toFixed(2)} dB`;
+    document.getElementById('io-kpi1-sub').textContent = `${mt.peak_efficiency_pct.toFixed(1)}% @ ${mt.peak_wavelength_nm.toFixed(1)} nm`;
+
+    document.getElementById('io-kpi2-lbl').textContent = zh ? '1-dB / 3-dB 光学带宽' : '1-dB / 3-dB Bandwidth';
+    document.getElementById('io-kpi2-val').textContent = `${mt.bw_1db_nm.toFixed(1)} / ${mt.bw_3db_nm.toFixed(1)} nm`;
+    document.getElementById('io-kpi2-sub').textContent = `${res.fiber_label || res.fiber_preset} (${res.fiber_angle_deg}°)`;
+
+    document.getElementById('io-kpi3-lbl').textContent = zh ? '合成光栅周期与刻蚀' : 'Synthesized Grating Teeth';
+    document.getElementById('io-kpi3-val').textContent = `Λ = ${(sy.pitch_mean_um * 1000).toFixed(1)} nm`;
+    document.getElementById('io-kpi3-sub').textContent = `Etch ${(res.etch_depth_um * 1000).toFixed(0)} nm · ff ${sy.ff_start.toFixed(2)}→${sy.ff_end.toFixed(2)}`;
+
+    document.getElementById('io-kpi4-lbl').textContent = zh ? '向上方向性与反射 S11' : 'Directionality & S11';
+    document.getElementById('io-kpi4-val').textContent = `${mt.upward_directionality_pct.toFixed(1)}% | ${mt.s11_db.toFixed(1)} dB`;
+    document.getElementById('io-kpi4-sub').textContent = `Sub leak ${mt.substrate_loss_pct.toFixed(1)}% · BOX ${res.box_thickness_um} µm`;
+
+    const warnHtml = (res.warnings && res.warnings.length) ? `<br/><span style="color:#fbbf24;">💡 ${res.warnings[0]}</span>` : '';
+    document.getElementById('io-banner').innerHTML = (zh
+      ? `<strong>原生 2D 全波 Maxwell FDFD（含 UPML 吸收边界 + Rytov 二阶色散）</strong>：<code>${res.core_material}</code> 膜厚 <code>${(res.film_height_um*1000).toFixed(0)} nm</code>，刻蚀 <code>${(res.etch_depth_um*1000).toFixed(0)} nm</code>，共 <code>${res.num_periods}</code> 齿（长 <code>${sy.grating_length_um} µm</code>，焦距 <code>${res.focal_length_um} µm</code>）。`
+      : `<strong>Native 2D Full-Wave Maxwell FDFD (UPML + 2nd-Order Rytov Bloch Synthesis)</strong>: <code>${res.core_material}</code> <code>H = ${(res.film_height_um*1000).toFixed(0)} nm</code>, etch <code>${(res.etch_depth_um*1000).toFixed(0)} nm</code>, <code>${res.num_periods}</code> periods (<code>L = ${sy.grating_length_um} µm</code>, focal <code>${res.focal_length_um} µm</code>).`) + warnHtml;
+
+    document.getElementById('io-plot1-title').textContent = zh ? '宽谱耦合插入损耗 IL(λ) 与波导回波反射 S11(λ)' : 'Broadband Insertion Loss IL(λ) & Reflection S11(λ)';
+    document.getElementById('io-plot1-sub').textContent = `2D Full-Wave FDFD (${res.elapsed_ms} ms)`;
+    document.getElementById('io-plot2-title').textContent = zh ? '二维全波辐射电场分布 |E(z, y)|' : '2D Full-Wave Radiated Electric Field |E(z, y)|';
+    document.getElementById('io-plot2-sub').textContent = zh ? '导模入射 → 向上倾斜光纤束 + BOX 反射' : 'Guided Launch -> Upward Fiber Beam & BOX Interference';
+
+    drawGcSpectrumPlot(res);
+    drawGcBeamHeatmap(res);
+  } else {
+    document.getElementById('io-kpi1-lbl').textContent = zh ? '总端面插入损耗 IL' : 'Total Coupling Loss';
+    document.getElementById('io-kpi1-val').textContent = `${mt.total_il_db.toFixed(2)} dB`;
+    document.getElementById('io-kpi1-sub').textContent = `${mt.total_efficiency_pct.toFixed(1)}% (Facet ${mt.facet_il_db.toFixed(2)} + Taper ${mt.taper_il_db.toFixed(2)} dB)`;
+
+    document.getElementById('io-kpi2-lbl').textContent = zh ? '最优倒锥尖端宽 W_tip' : 'Optimal Inverse-Taper Tip';
+    document.getElementById('io-kpi2-val').textContent = `${(res.w_tip_um * 1000).toFixed(0)} nm`;
+    document.getElementById('io-kpi2-sub').textContent = `Chip MFD ${mt.chip_mfd_x_um.toFixed(2)} × ${mt.chip_mfd_y_um.toFixed(2)} µm`;
+
+    document.getElementById('io-kpi3-lbl').textContent = zh ? '1-dB 对准容差 (Δx, Δy)' : '1-dB Alignment Tolerance';
+    document.getElementById('io-kpi3-val').textContent = `±${mt.tol_1db_x_um.toFixed(2)} / ±${mt.tol_1db_y_um.toFixed(2)} µm`;
+    document.getElementById('io-kpi3-sub').textContent = `3-dB: ±${mt.tol_3db_x_um.toFixed(2)} / ±${mt.tol_3db_y_um.toFixed(2)} µm`;
+
+    document.getElementById('io-kpi4-lbl').textContent = zh ? '回波损耗 RL 与推荐锥长' : 'Return Loss & Adiabatic L';
+    document.getElementById('io-kpi4-val').textContent = `${mt.return_loss_db.toFixed(1)} dB | ${res.recommended_taper_length_um.toFixed(0)} µm`;
+    document.getElementById('io-kpi4-sub').textContent = `${res.ar_coating ? 'AR Coated' : 'Bare Facet'} · n_tip = ${mt.n_eff_tip.toFixed(4)}`;
+
+    const warnHtml = (res.warnings && res.warnings.length) ? `<br/><span style="color:#fbbf24;">💡 ${res.warnings[0]}</span>` : '';
+    document.getElementById('io-banner').innerHTML = (zh
+      ? `<strong>原生 2D 全矢量有限元 (FEM) + 复数坡印廷重叠积分 + EME 绝热锥长分析</strong>：对接 <code>${res.fiber_label}</code>（模斑 <code>${res.fiber_mfd_x_um} × ${res.fiber_mfd_y_um} µm</code>），最优尖端宽 <code>W_tip = ${(res.w_tip_optimal_um*1000).toFixed(0)} nm</code>。`
+      : `<strong>Native 2D Vector FEM + Complex Poynting Overlap + Adiabatic EME</strong>: Coupling <code>${res.core_material}</code> bus (<code>W = ${res.w_bus_um} µm</code>) to <code>${res.fiber_label}</code> (<code>MFD ${res.fiber_mfd_x_um} × ${res.fiber_mfd_y_um} µm</code>).`) + warnHtml;
+
+    document.getElementById('io-plot1-title').textContent = zh ? '倒锥尖端宽 W_tip 扫描与模斑耦合损耗' : 'Inverse-Taper Tip Width W_tip Optimization Sweep';
+    document.getElementById('io-plot1-sub').textContent = `2D Vector FEM + Poynting Overlap (${res.elapsed_ms} ms)`;
+    document.getElementById('io-plot2-title').textContent = zh ? '光纤/激光器横向 Δx 与纵向 Δy 对准容差曲线' : 'Lateral (Δx) & Vertical (Δy) Misalignment Penalty';
+    document.getElementById('io-plot2-sub').textContent = `1-dB Tol: ±${mt.tol_1db_x_um.toFixed(2)} µm (x), ±${mt.tol_1db_y_um.toFixed(2)} µm (y)`;
+
+    drawButtTipSweepPlot(res);
+    drawButtAlignmentPlot(res);
+  }
+}
+
+function renderHighQResult(res) {
+  if (!res || !res.Q_loaded) return;
+  const zh = currentLang === 'zh';
+  const tr0 = (res.truncated_fdtd_traces && res.truncated_fdtd_traces[1]) || (res.truncated_fdtd_traces && res.truncated_fdtd_traces[0]) || {};
+
+  document.getElementById('io-kpi1-lbl').textContent = zh ? '精确稳态有载 Q 值' : 'Converged Loaded Q';
+  document.getElementById('io-kpi1-val').textContent = Number(res.Q_loaded).toLocaleString();
+  document.getElementById('io-kpi1-sub').textContent = `FWHM = ${res.FWHM_pm.toFixed(3)} pm · τ_ph = ${res.photon_lifetime_ps.toFixed(1)} ps`;
+
+  document.getElementById('io-kpi2-lbl').textContent = zh ? '3D-FDTD 1e-5 收敛所需时间' : 'Required 1e-5 FDTD Sim Time';
+  document.getElementById('io-kpi2-val').textContent = `${res.required_fdtd_sim_time_1e5_ns.toFixed(2)} ns`;
+  document.getElementById('io-kpi2-sub').textContent = `${Number(res.required_fdtd_roundtrips_1e5).toLocaleString()} cavity round-trips!`;
+
+  document.getElementById('io-kpi3-lbl').textContent = zh ? '无限圈真实消光比 ER' : 'True Converged ER (M → ∞)';
+  document.getElementById('io-kpi3-val').textContent = `${res.true_converged_er_db.toFixed(2)} dB`;
+  document.getElementById('io-kpi3-sub').textContent = tr0.fdtd_sim_time_ps
+    ? `vs ${tr0.apparent_er_db.toFixed(2)} dB @ ${tr0.fdtd_sim_time_ps} ps FDTD`
+    : 'Exact analytical steady state';
+
+  document.getElementById('io-kpi4-lbl').textContent = zh ? '混合单程耦合区 FDTD 提速' : 'Coupler-Cutout Speedup';
+  document.getElementById('io-kpi4-val').textContent = `${Number(res.time_domain_speedup_factor).toLocaleString()}×`;
+  document.getElementById('io-kpi4-sub').textContent = `Single pass ${res.coupler_only_fdtd_time_ps} ps vs ${res.required_fdtd_sim_time_1e5_ps.toFixed(0)} ps`;
+
+  document.getElementById('io-banner').innerHTML = zh
+    ? `<strong>为何高 Q 微环在 Lumerical 3D-FDTD 中极慢且无法收敛？</strong> 腔内光子寿命 <code>τ_ph = ${res.photon_lifetime_ps.toFixed(1)} ps</code>，能量衰减至 <code>1e-5</code> 需 <code>11.51 × τ_ph = ${res.required_fdtd_sim_time_1e5_ns.toFixed(2)} ns</code>（<code>${Number(res.required_fdtd_roundtrips_1e5).toLocaleString()}</code> 圈往返）。提前截断会产生严重 sinc 振铃伪影并使消光比坍塌；点击右上角 <strong>✂️ 导出单次耦合区切片</strong> 可将 3D-FDTD 缩短至 <code>${res.coupler_only_fdtd_time_ps} ps</code>！`
+    : `<strong>Why Lumerical 3D-FDTD Stalls on High-Q Rings:</strong> Cavity photon lifetime is <code>τ_ph = ${res.photon_lifetime_ps.toFixed(1)} ps</code>, requiring <code>11.51 × τ_ph = ${res.required_fdtd_sim_time_1e5_ns.toFixed(2)} ns</code> (<code>${Number(res.required_fdtd_roundtrips_1e5).toLocaleString()}</code> round-trips) to reach <code>auto shutoff = 1e-5</code>. Early cutoff causes FFT sinc-ringing &amp; collapsed ER. Click <strong>✂️ Export Coupler Cutout</strong> above for a <code>${res.coupler_only_fdtd_time_ps} ps</code> single-pass 3D-FDTD!`;
+
+  document.getElementById('io-plot1-title').textContent = zh ? '精确稳态谐振谷 (M → ∞) vs 截断 3D-FDTD Sinc 振铃伪影' : 'Exact Converged Dip (M → ∞) vs Truncated 3D-FDTD Ringing';
+  document.getElementById('io-plot1-sub').textContent = `λ_res = ${res.resonance_wavelength_nm.toFixed(5)} nm · FWHM = ${res.FWHM_pm.toFixed(3)} pm`;
+  document.getElementById('io-plot2-title').textContent = zh ? '表观消光比 ER 与腔内剩余能量 vs FDTD 仿真时长' : 'Apparent ER & Residual Cavity Energy vs FDTD Time';
+  document.getElementById('io-plot2-sub').textContent = `True ER = ${res.true_converged_er_db.toFixed(1)} dB`;
+
+  drawHighQResonancePlot(res);
+  drawHighQShutoffPlot(res);
+}
+
+function drawGcSpectrumPlot(res) {
+  const sp = res.spectrum || {};
+  const wl = sp.wavelength_nm || [];
+  const ilNeg = (sp.il_db || []).map(v => -v);
+  const s11 = sp.s11_db || [];
+  if (!wl.length) return;
+  drawLinePlot('cv-io-main', [
+    { x: wl, y: ilNeg, color: '#34d399', label: 'Coupling S21 = -IL [dB]' },
+    { x: wl, y: s11, color: '#f59e0b', label: 'Back-Reflection S11 [dB]', dashed: true }
+  ], currentLang === 'zh' ? '波长 Wavelength [nm]' : 'Wavelength [nm]', 'S21 / S11 [dB]', res.metrics.peak_wavelength_nm);
+}
+
+function drawGcBeamHeatmap(res) {
+  const f = res.field_2d;
+  const { ctx, w, h } = setupCanvas('cv-io-aux');
+  ctx.fillStyle = '#070b14';
+  ctx.fillRect(0, 0, w, h);
+  if (!f || !f.E_norm || !f.E_norm.length) return;
+
+  const pad = { l: 48, r: 16, t: 18, b: 34 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const zArr = f.z_um, yArr = f.y_um, eMat = f.E_norm;
+  const ny = eMat.length, nz = eMat[0].length;
+
+  const off = document.createElement('canvas');
+  off.width = nz; off.height = ny;
+  const octx = off.getContext('2d');
+  const img = octx.createImageData(nz, ny);
+  for (let iy = 0; iy < ny; iy++) {
+    const row = eMat[ny - 1 - iy];
+    for (let iz = 0; iz < nz; iz++) {
+      const v = Math.max(0, Math.min(1, row[iz] / 1.05));
+      const g = Math.pow(v, 0.65);
+      // Perceptually uniform dark-navy -> royal -> cyan -> amber -> white plasma ramp
+      let rC, gC, bC;
+      if (g < 0.33) {
+        const u = g / 0.33;
+        rC = 8 + 30 * u; gC = 14 + 95 * u; bC = 32 + 165 * u;
+      } else if (g < 0.68) {
+        const u = (g - 0.33) / 0.35;
+        rC = 38 + 205 * u; gC = 109 + 85 * u; bC = 197 - 125 * u;
+      } else {
+        const u = (g - 0.68) / 0.32;
+        rC = 243 + 12 * u; gC = 194 + 58 * u; bC = 72 + 170 * u;
+      }
+      const p = 4 * (iy * nz + iz);
+      img.data[p] = rC; img.data[p + 1] = gC; img.data[p + 2] = bC; img.data[p + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, pad.l, pad.t, pw, ph);
+
+  const zMin = zArr[0], zMax = zArr[zArr.length - 1];
+  const yMin = yArr[0], yMax = yArr[yArr.length - 1];
+  const ty = yv => pad.t + ph - ((yv - yMin) / Math.max(yMax - yMin, 1e-6)) * ph;
+
+  // Overlay waveguide core & BOX boundaries (distinct structural white/slate dashed lines vs field colors)
+  ctx.strokeStyle = 'rgba(248,250,252,0.72)';
+  ctx.lineWidth = 1.1;
+  ctx.setLineDash([4, 3]);
+  [0.0, res.film_height_um || 0.22, -(res.box_thickness_um || 2.0)].forEach(yv => {
+    if (yv >= yMin && yv <= yMax) {
+      ctx.beginPath(); ctx.moveTo(pad.l, ty(yv)); ctx.lineTo(pad.l + pw, ty(yv)); ctx.stroke();
+    }
+  });
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = '#475569'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(pad.l, pad.t, pw, ph);
+  ctx.fillStyle = '#cbd5e1'; ctx.font = '10.5px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  [zMin, 0.5 * (zMin + zMax), zMax].forEach(zv => {
+    const px = pad.l + ((zv - zMin) / (zMax - zMin)) * pw;
+    ctx.fillText(zv.toFixed(1), px, h - 17);
+  });
+  ctx.fillText('Propagation z [µm]', pad.l + pw / 2, h - 4);
+  ctx.textAlign = 'right';
+  [yMin, 0.0, yMax].forEach(yv => ctx.fillText(yv.toFixed(1), pad.l - 5, ty(yv) + 3.5));
+}
+
+function drawButtTipSweepPlot(res) {
+  const ts = res.tip_sweep || [];
+  if (!ts.length) return;
+  const xs = ts.map(r => r.w_tip_um * 1000.0).reverse();
+  const ys = ts.map(r => r.facet_il_db).reverse();
+  const mfdX = ts.map(r => r.chip_mfd_x_um).reverse();
+  drawLinePlot('cv-io-main', [
+    { x: xs, y: ys, color: '#38bdf8', label: 'Facet Coupling Loss IL [dB]' },
+    { x: xs, y: mfdX, color: '#34d399', label: 'Expanded Chip MFD_x [µm]', dashed: true }
+  ], 'Inverse-Taper Tip Width W_tip [nm]', 'Facet IL [dB] / Chip MFD [µm]', res.w_tip_um * 1000.0);
+}
+
+function drawButtAlignmentPlot(res) {
+  const al = res.alignment || {};
+  if (!al.offset_x_um) return;
+  drawLinePlot('cv-io-aux', [
+    { x: al.offset_x_um, y: al.il_x_db, color: '#38bdf8', label: 'Lateral Offset Δx IL [dB]' },
+    { x: al.offset_y_um, y: al.il_y_db, color: '#f59e0b', label: 'Vertical Offset Δy IL [dB]', dashed: true }
+  ], 'Fiber / Laser Misalignment Offset [µm]', 'Coupling Insertion Loss [dB]', 0.0);
+}
+
+function drawHighQResonancePlot(res) {
+  const det = res.detuning_pm || [];
+  const infDb = res.converged_infinite_rt_thru_dB || [];
+  if (!det.length) return;
+  const palette = ['#f472b6', '#f59e0b', '#a78bfa', '#34d399'];
+  const series = (res.truncated_fdtd_traces || []).map((tr, i) => ({
+    x: det,
+    y: tr.thru_dB,
+    color: palette[i % palette.length],
+    label: `FDTD @ ${tr.fdtd_sim_time_ps} ps (${tr.completed_roundtrips} RT, ER=${tr.apparent_er_db.toFixed(1)} dB)`,
+    dashed: true
+  }));
+  series.push({
+    x: det,
+    y: infDb,
+    color: '#38bdf8',
+    label: `Converged M→∞ (ER=${res.true_converged_er_db.toFixed(1)} dB)`
+  });
+  drawLinePlot('cv-io-main', series, 'Detuning Around Exact Resonance Δλ [pm]', 'Through Transmission [dB]', 0.0);
+}
+
+function drawHighQShutoffPlot(res) {
+  const trs = res.truncated_fdtd_traces || [];
+  if (!trs.length) return;
+  const xs = trs.map(t => t.fdtd_sim_time_ps);
+  const ers = trs.map(t => t.apparent_er_db);
+  const trueLine = xs.map(() => res.true_converged_er_db);
+  drawLinePlot('cv-io-aux', [
+    { x: xs, y: ers, color: '#f59e0b', label: 'Truncated FDTD Apparent ER [dB]' },
+    { x: xs, y: trueLine, color: '#34d399', label: `True Infinite-RT ER (${res.true_converged_er_db.toFixed(1)} dB)`, dashed: true }
+  ], 'FDTD Simulation Cutoff Time t_sim [ps]', 'Extinction Ratio ER [dB]', null);
 }
 
 // ==================== BOOTSTRAP ====================

@@ -1,19 +1,21 @@
 cff-version: 1.2.0
-title: "OpenMRR Studio: License-Free Conversational Eigenmode, CMT & Bidirectional GDSII Designer for Integrated Photonic Microrings"
-message: "If OpenMRR Studio helps your research, tape-out, or teaching, please cite it using the metadata below."
+title: "MicroRing Studio: License-Free Photonic IC, Microring Resonator, Butt/Grating Coupler, and High-Q CAD Suite"
+message: "If MicroRing Studio helps your research, tape-out, or teaching, please cite it using the metadata below."
 type: software
 authors:
   - family-names: "Ren"
     given-names: "Zhihao"
     orcid: "https://orcid.org/0000-0002-2520-0784"
-version: 3.4.0
+version: 3.5.0
 date-released: "2026-11-01"
 license: MIT
-repository-code: "https://github.com/ZhihaoRenKevin/openmrr-studio"
+repository-code: "https://github.com/ZhihaoRenKevin/microring-studio"
 keywords:
-  - integrated photonics
+  - photonic integrated circuits
+  - optical interconnect
   - microring resonator
+  - grating coupler
+  - butt and edge coupler
+  - high-Q resonator convergence
   - Maxwell eigenmode solver
-  - coupled-mode theory
   - GDSII layout
-  - visible to mid-infrared photonics
