@@ -1,4 +1,4 @@
-"""Command-Line Interface (`openmrr`) for `OpenMRR Studio v3.0`.
+"""Command-Line Interface (`openmrr`) for `OpenMRR Studio`.
 
 Supports human interactive modes AND ultra-low-token AI agent / MCP modes:
   openmrr                       # Launch native desktop UI window (falls back to browser)
@@ -15,6 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
+from . import __version__
 from .agent_tools import (
     agent_active_tuning,
     agent_design_mrr,
@@ -39,7 +40,7 @@ def _print_compact(data: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="openmrr",
-        description="OpenMRR Studio v3.1 — License-Free Multi-Waveband Photonics Eigenmode, CMT, GDSII & AI-Agent MCP Suite",
+        description=f"OpenMRR Studio v{__version__} - License-Free Multi-Waveband Photonics Eigenmode, 2D-FEM Active Tuning, CMT, GDSII & AI-Agent MCP Suite",
     )
     sub = parser.add_subparsers(dest="cmd")
 

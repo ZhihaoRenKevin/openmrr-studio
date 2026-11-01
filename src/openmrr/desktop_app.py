@@ -1,4 +1,4 @@
-"""Native Desktop & Browser Application Launcher for `OpenMRR Studio v3.3`.
+"""Native Desktop & Browser Application Launcher for `OpenMRR Studio`.
 
 Starts the local `127.0.0.1` Starlette/Uvicorn server in a background daemon thread
 and opens either:
@@ -33,8 +33,10 @@ if not getattr(sys, "frozen", False):
         sys.path.insert(0, _src_dir)
 
 try:
+    from openmrr import __version__ as APP_VERSION
     from openmrr.app_server import app
 except ImportError:
+    from . import __version__ as APP_VERSION
     from .app_server import app
 
 
@@ -121,7 +123,7 @@ def launch_studio(
             import webview  # type: ignore
 
             webview.create_window(
-                "OpenMRR Studio v3.2 — License-Free Photonics Microring Designer",
+                f"OpenMRR Studio v{APP_VERSION} - License-Free Photonics Microring Designer",
                 url,
                 width=1460,
                 height=900,
@@ -146,7 +148,7 @@ def launch_studio(
 
 def main() -> None:
     multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser(description="Launch OpenMRR Studio v3.2")
+    parser = argparse.ArgumentParser(description=f"Launch OpenMRR Studio v{APP_VERSION}")
     parser.add_argument("--browser", action="store_true", help="Open in default web browser instead of native window")
     parser.add_argument("--no-open", action="store_true", help="Serve HTTP UI without opening a new browser window")
     parser.add_argument("--headless-check", action="store_true", help="Verify local server + 2D FEM startup and exit")

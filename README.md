@@ -6,6 +6,7 @@
 
 [![Run Online in Browser](https://img.shields.io/badge/Run_Online-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/ZhihaoRenKevin/openmrr-studio?quickstart=1)
 [![Desktop Installers: .dmg & .exe](https://img.shields.io/badge/Desktop_App-macOS_.dmg_%7C_Win_.exe-0284c7)](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest)
+[![Release: v3.4.0](https://img.shields.io/badge/release-v3.4.0-10b981.svg)](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/tag/v3.4.0)
 [![Wavebands: 400nm–14µm](https://img.shields.io/badge/wavebands-400nm%20Vis%20to%2014%CE%BCm%20Mid--IR-ec4899.svg)](./docs/VERIFICATION_AND_BENCHMARKS.md)
 [![AI Modes: Offline | Claude | Codex | Ollama](https://img.shields.io/badge/AI_Modes-Offline_%7C_Claude_%7C_Codex_%7C_Ollama-8b5cf6.svg)](./docs/tutorials/ai_agents_codex_claude.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -50,8 +51,10 @@ flowchart LR
     G1["Uploaded .GDS / .OAS<br/>(KLayout / gdsfactory)"] --> B1["GDS Polygon Extractor<br/>R, W_ring, W_bus, gap, L_s, theta"]
     B1 --> C
     C --> M["2D Conformal FEM<br/>Bent n_eff(λ), n_g(λ),<br/>Single-Mode Cutoff W_SM"]
-    M --> S["Spatial CMT + TMM<br/>7 Topologies · Critical Coupling<br/>EO / TO / PCM Tuning"]
-    S --> G2["Foundry .GDS + .LYP<br/>Single Cell or MPW Sweep Array"]
+    M --> S["Spatial CMT + TMM<br/>7 Topologies · Critical Coupling<br/>PR Dose Tolerance"]
+    M --> A["2D-FEM Active Tuning<br/>TO Heat · Laplace EO · Si PN/PIN<br/>Perturbed n_eff(V, I, ΔT, E)"]
+    A --> IC["Ansys Lumerical INTERCONNECT<br/>SPAR .dat · OMM .txt · .lsf (.zip)"]
+    S --> G2["Foundry .GDS + .LYP<br/>Single Cell, MPW or Pre-Biased Array"]
     L["Measured Lab CSV<br/>Transmission Trace"] --> F["Auto-BIC CMT Fitter<br/>Q_int, Q_ext, α, 2g/2π, n_g"]
 ```
 

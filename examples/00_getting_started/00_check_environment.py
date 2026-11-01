@@ -1,4 +1,4 @@
-"""Recipe 00a: Verify OpenMRR Studio environment, GPU/AMX/CPU compute & 18 materials.
+"""Recipe 00a: Verify OpenMRR Studio environment, GPU/AMX/CPU compute & 24 materials.
 
 Run:
     uv run python examples/00_getting_started/00_check_environment.py
@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from openmrr import MATERIAL_CATALOG, T_REF_K, detect_hardware_profile, run_compute_benchmark
+from openmrr import MATERIAL_CATALOG, T_REF_K, __version__, detect_hardware_profile, run_compute_benchmark
 
 
 def main() -> None:
@@ -21,7 +21,7 @@ def main() -> None:
     bench = run_compute_benchmark(100_000)
 
     print("=" * 74)
-    print("OpenMRR Studio v3.0 — Environment & Hardware Verification")
+    print(f"OpenMRR Studio v{__version__} - Environment & Hardware Verification")
     print("=" * 74)
     print(f"OS / Arch          : {prof.os_name} ({prof.arch})")
     print(f"CPU                : {prof.cpu_brand} ({prof.cpu_cores} cores)")

@@ -46,14 +46,35 @@ This generates `benchmarks/outputs/lumerical_vs_openmrr_validation.csv` and `LUM
 
 ---
 
-## 3. Physical Scope Boundaries
+## 3. Native 2D-FEM Active Tuning & Lumerical INTERCONNECT Passivity Verification (`v3.4.0`)
 
-- **High-Confidence Regime (`OpenMRR Studio` 2D Bent FEM + Spatial CMT)**:
+Reproducible locally with zero COMSOL or Lumerical licenses via:
+
+```bash
+python examples/01_devices_and_sweeps/05_active_tuning_pn_eo_to_interconnect.py
+python tests/test_openmrr_all.py
+```
+
+OpenMRR Studio `v3.4.0` solves cross-section active perturbations natively in `scikit-fem` and injects cell-wise $\Delta\varepsilon(x,y) = (n_0 + \Delta n + i\Delta k)^2 - n_0^2$ (`ElementDG(ElementTriP1())`) directly into the 2D curl-conforming `Nedelec1 * Lagrange P2` Maxwell eigenmode solver (`solve_perturbed_neff_sweep_fem`):
+
+| Active Mechanism | Cross-Section PDE / Carrier Physics | Verified Benchmark (`Darwin-arm64`) | Extracted Figure of Merit |
+| :--- | :--- | :--- | :--- |
+| **`si_pn_depletion`** (`220 nm` Si rib, `90 nm` slab, `0..-5 V`) | Poisson $W_{\mathrm{dep}}(V)$ + Debye-screened 2D carriers + Soref-Bennett $\Delta n + i\Delta k$ | `R = 20 µm`, `1550 nm` | `11.53 pm/V`, $V_\pi L = 2.088\text{ V}\cdot\text{cm}$, $f_{3\mathrm{dB}} = 6.29\text{ GHz}$ |
+| **`pockels_eo`** (`600 nm` X-cut TFLN, `GSG` electrodes) | 2D anisotropic Laplace $-\nabla\cdot(\varepsilon_0\boldsymbol{\varepsilon}_{\mathrm{DC}}\nabla\phi)=0$ + tensor $r_{ij}$ | `G = 5.0 -> 3.2 µm` | $V_\pi L = 5.358 \rightarrow 3.603\text{ V}\cdot\text{cm}$, $f_{3\mathrm{dB}} = 19.02\text{ GHz}$ |
+| **`thermo_optic`** (`400 nm` Si3N4 + `TiN` microheater) | 2D Fourier heat conduction $-\nabla\cdot(\kappa_{\mathrm{th}}\nabla\Delta T)=Q_{\mathrm{vol}}$ | `BOX = 2.0 -> 3.5 µm` | $R_{\mathrm{th}} = 1.153 \rightarrow 1.566\text{ K/mW}$, $P_\pi = 156.8 \rightarrow 115.5\text{ mW}$ |
+| **Lumerical INTERCONNECT (`SPAR .dat`)** | Multi-state complex S-matrix export (`|S21|^2 + |S31|^2 <= 1`) | `1875` frequency pts/state | `passivity = True` across all bias states |
+
+---
+
+## 4. Physical Scope Boundaries
+
+- **High-Confidence Regime (`OpenMRR Studio` 2D Bent FEM + Spatial CMT + 2D Multiphysics FEM)**:
   - Guided straight and moderately bent waveguide dispersion ($n_{\mathrm{eff}}$, $n_g$, FSR, single-mode cutoff $W_{\mathrm{SM}}$);
   - Weak-to-moderate evanescent couplers (`gap >= 150 nm` in NIR, `>= 300 nm` in Mid-IR) including phase-mismatched wrap-around pulley couplers;
-  - Linear thermo-optic ($\Delta T \cdot dn/dT$) and Pockels electro-optic ($r_{ij}$) resonance tuning;
+  - Cross-sectional 2D Fourier thermo-optic (`TiN`/`Pt`/`W` microheaters), 2D Laplace Pockels electro-optic (`GSG`/vertical electrodes), and Silicon PN depletion / PIN injection perturbed eigenmode shifts;
+  - Positive vs. negative photoresist exposure-dose / CD-bias coupling drift and 5-cell pre-biased mask synthesis;
   - Post-fabrication Lorentzian, CW/CCW Split-Doublet, Fano, and Multi-FSR transmission fitting.
-- **Regimes Requiring Full `3D FDTD` Before Final Foundry Tape-Out**:
+- **Regimes Requiring Full `3D FDTD` / `3D TCAD` Before Final Foundry Tape-Out**:
   - Ultra-tight sub-`120 nm` high-index-contrast gaps where strong supermode distortion and parasitic coupler radiation loss ($1 - |S_{21}|^2 - |S_{31}|^2 > 1\%$) occur;
-  - Abrupt straight-to-bend racetrack junctions without adiabatic Euler transitions;
+  - Abrupt straight-to-bend racetrack junctions without adiabatic Euler transitions, or 3D in-plane longitudinal heat spreading near short heater corners / thermal isolation trenches;
   - Ultra-sharp bends ($R < 5\,\mu\text{m}$ in `Si3N4` or thin-BOX substrate leakage) where radiative $Q_{\mathrm{rad}}$ limits unloaded $Q_{\mathrm{int}}$.

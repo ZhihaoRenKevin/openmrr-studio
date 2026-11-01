@@ -244,6 +244,7 @@ def build_package(target: str) -> int:
         "--hidden-import=uvicorn",
         "--hidden-import=starlette",
         "--hidden-import=anyio._backends._asyncio",
+        "--collect-submodules=openmrr",
         "--collect-submodules=skfem",
         "--collect-submodules=uvicorn",
     ]

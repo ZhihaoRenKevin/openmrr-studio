@@ -29,7 +29,7 @@ python tests/test_openmrr_all.py
 | **Foundations** | 24-material catalog (`400 nm` to `14 um`), pure-BSD 2D bent/straight vector FEM & single-mode cutoff | **v3.1+ (Ready)** |
 | **Devices & GDSII** | 7 MRR topologies (point, racetrack, concentric pulley, Vernier), bidirectional `.gds` caliper & MPW arrays | **v3.1+ (Ready)** |
 | **Lab & Desktop** | Bilingual guided UI, `dB/cm` loss workflow, split-doublet CMT fitter, `.dmg`/`.exe` & Claude/Codex MCP | **v3.2+ (Ready)** |
-| **Cleanroom Fab** | Positive PR vs. Negative PR over/under-dose analyzer (`ER >= 15 dB` window) & 5-cell pre-biased `.GDS` | **v3.3 (Ready)** |
-| **Upcoming** | Coupled 2D steady-state electro-thermal (`HEAT`) Poisson solver (`scikit-fem`) | Planned |
+| **Cleanroom Fab** | Positive PR vs. Negative PR over/under-dose analyzer (`ER >= 15 dB` window) & 5-cell pre-biased `.GDS` | **v3.3+ (Ready)** |
+| **Active Tuning & IC** | Native 2D-FEM `TO` (`HEAT`), `EO` (Laplace), `Si PN/PIN` (Soref-Bennett), perturbed eigenmodes & Lumerical INTERCONNECT `.zip` | **v3.4 (Ready)** |
 | **Upcoming** | Broadband Kerr microcomb integrated dispersion (`D_int`, `D_2`, `D_3`) & Lugiato-Lefever preview | Planned |
 | **Upcoming** | Open foundry PDK grating/edge-coupler test-frame wrappers (`gdsfactory` / `cspdk` / `ubcpdk`) | Planned |
