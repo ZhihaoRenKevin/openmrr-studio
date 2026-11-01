@@ -18,6 +18,7 @@ import time
 
 import numpy as np
 
+from .active_tuning import export_lumerical_interconnect_bundle, run_active_tuning_analysis
 from .fab_tolerance import export_fab_bias_array_gds, run_fabrication_error_analysis
 from .gds_bridge import (
     analyze_uploaded_gds,
@@ -408,3 +409,81 @@ def agent_fab_tolerance(params: dict) -> dict:
         )
         out["bias_gds"] = gds_info["gds_path"]
     return out
+
+
+def agent_active_tuning(params: dict) -> dict:
+    """Run 2D-FEM active tuning (TO/EO/Si-PN/Si-PIN + T/E/V/I sweeps) & optional INTERCONNECT export (<150 tokens)."""
+    t0 = time.perf_counter()
+    AGENT_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = _cfg_from_dict(params)
+    if params.get("apply_cc"):
+        scout = simulate_mrr_topology(cfg)
+        cc_info = scout["critical_coupling"]
+        cfg = replace(cfg, **{cc_info["parameter"]: float(cc_info["recommended_value"])})
+
+    raw_b = params.get("bias_values") or params.get("biases")
+    bias_list: list[float] | None = None
+    if isinstance(raw_b, str) and raw_b.strip():
+        bias_list = [float(x.strip()) for x in raw_b.split(",") if x.strip()]
+    elif isinstance(raw_b, (list, tuple)) and len(raw_b) > 0:
+        bias_list = [float(x) for x in raw_b]
+
+    mech = str(params.get("mechanism") or "auto")
+    drv = str(params.get("drive_type") or params.get("drive") or "auto")
+
+    tune = run_active_tuning_analysis(
+        cfg,
+        mechanism=mech,
+        drive_type=drv,
+        bias_values=bias_list,
+        active_fraction=float(params.get("active_fraction") or 0.78),
+        heater_material=str(params.get("heater_material") or "TiN"),
+        heater_width_um=float(params.get("heater_width_um") or 1.60),
+        heater_gap_um=float(params.get("heater_gap_um") or 0.90),
+        box_thickness_um=float(params.get("box_thickness_um") or 2.00),
+        electrode_gap_um=float(params["electrode_gap_um"]) if params.get("electrode_gap_um") is not None else None,
+        na_p_cm3=float(params.get("na_p_cm3") or 5.0e17),
+        nd_n_cm3=float(params.get("nd_n_cm3") or 5.0e17),
+        pn_offset_nm=float(params.get("pn_offset_nm") or 25.0),
+        heavy_contact_offset_um=float(params.get("heavy_contact_offset_um") or 0.85),
+    )
+
+    eff = tune["efficiency"]
+    states = tune["states"]
+    csv_path = AGENT_OUT_DIR / f"tuning_{cfg.core_material}_{eff['mechanism']}.csv"
+    np.savetxt(
+        csv_path,
+        np.column_stack([
+            [s["bias_value"] for s in states],
+            [s["delta_neff_active_real"] for s in states],
+            [s["alpha_active_db_per_cm"] for s in states],
+            [s["delta_wl_pm"] for s in states],
+            [s["ER_thru_dB"] for s in states],
+        ]),
+        delimiter=",",
+        header=f"bias_{eff['drive_unit']},delta_neff_active_real,alpha_active_dB_per_cm,delta_wl_pm,ER_thru_dB",
+        comments="",
+    )
+
+    out = {
+        "mech": eff["mechanism"],
+        "drive": f"{eff['drive_type']}[{eff['drive_unit']}]",
+        "slope": f"{eff['primary_slope']} {eff['primary_slope_unit']}",
+        "freq_slope": f"{eff['freq_slope']} {eff['freq_slope_unit']}",
+        "pi_fom": f"{eff['pi_figure']} {eff['pi_figure_unit']}",
+        "bw_3dB": f"{eff['bandwidth_3db']} {eff['bandwidth_unit']}" if eff.get("bandwidth_3db") else None,
+        "dwl_span_pm": [states[0]["delta_wl_pm"], states[-1]["delta_wl_pm"]],
+        "loss_span_dB_cm": [states[0]["alpha_active_db_per_cm"], states[-1]["alpha_active_db_per_cm"]],
+        "ms": round((time.perf_counter() - t0) * 1e3, 1),
+        "csv": str(csv_path),
+    }
+    if params.get("export_interconnect"):
+        ic = export_lumerical_interconnect_bundle(
+            cfg,
+            tune,
+            AGENT_OUT_DIR / f"interconnect_{cfg.core_material}_{eff['mechanism']}",
+            make_zip=True,
+        )
+        out["interconnect_zip"] = ic["zip_path"]
+    return out
+

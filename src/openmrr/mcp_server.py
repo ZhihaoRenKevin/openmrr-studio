@@ -16,6 +16,7 @@ import traceback
 
 from . import __version__
 from .agent_tools import (
+    agent_active_tuning,
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
@@ -142,6 +143,33 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "openmrr_active_tuning",
+        "description": "Compute 2D-FEM TO/EO/Si-PN/Si-PIN tuning efficiency & multi-state spectra (V, I, P, Delta_T, or E-field) linked to cross-section geometry (zero COMSOL), plus optional Lumerical INTERCONNECT export.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mechanism": {"type": "string", "description": "auto, si_pn_depletion, pockels_eo, thermo_optic, si_pin_injection"},
+                "drive_type": {"type": "string", "description": "auto, voltage_v, current_ma, power_mw, delta_temp_k, e_field_v_per_um"},
+                "bias_values": {"type": "array", "items": {"type": "number"}},
+                "top": {"type": "string"},
+                "mat": {"type": "string"},
+                "h_um": {"type": "number"},
+                "slab_um": {"type": "number"},
+                "w_ring_um": {"type": "number"},
+                "r_um": {"type": "number"},
+                "gap_um": {"type": "number"},
+                "heater_gap_um": {"type": "number"},
+                "box_thickness_um": {"type": "number"},
+                "electrode_gap_um": {"type": "number"},
+                "na_p_cm3": {"type": "number"},
+                "nd_n_cm3": {"type": "number"},
+                "pn_offset_nm": {"type": "number"},
+                "apply_cc": {"type": "boolean"},
+                "export_interconnect": {"type": "boolean"},
+            },
+        },
+    },
 ]
 
 _DISPATCH = {
@@ -152,6 +180,7 @@ _DISPATCH = {
     "openmrr_inspect_gds": agent_inspect_gds,
     "openmrr_fit_spectrum": agent_fit_spectrum,
     "openmrr_fab_tolerance": agent_fab_tolerance,
+    "openmrr_active_tuning": agent_active_tuning,
 }
 
 

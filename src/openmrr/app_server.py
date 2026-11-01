@@ -28,6 +28,11 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from .active_tuning import (
+    TUNING_MECHANISM_CATALOG,
+    export_lumerical_interconnect_bundle,
+    run_active_tuning_analysis,
+)
 from .copilot import (
     create_initial_session,
     get_welcome_chips,
@@ -169,6 +174,9 @@ def _chat_turn_sync(payload: dict) -> dict:
         lp = Path(res["gds_export"]["lyp_path"])
         res["gds_export"]["gds_download_url"] = f"/api/download_file?name={gp.name}"
         res["gds_export"]["lyp_download_url"] = f"/api/download_file?name={lp.name}"
+    if "interconnect_export" in res and res["interconnect_export"].get("zip_path"):
+        zp = Path(res["interconnect_export"]["zip_path"])
+        res["interconnect_export"]["zip_download_url"] = f"/api/download_file?name={zp.name}"
     return res
 
 
@@ -502,6 +510,75 @@ async def api_export_fab_gds(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+def _parse_bias_payload(raw_b) -> list[float] | None:
+    if isinstance(raw_b, str) and raw_b.strip():
+        return [float(x.strip()) for x in raw_b.split(",") if x.strip()]
+    if isinstance(raw_b, (list, tuple)) and len(raw_b) > 0:
+        return [float(x) for x in raw_b]
+    return None
+
+
+def _active_tuning_sync(payload: dict) -> dict:
+    cfg = _dict_to_mrr_config(payload.get("config", payload))
+    return run_active_tuning_analysis(
+        cfg,
+        mechanism=str(payload.get("mechanism", "auto")),
+        drive_type=str(payload.get("drive_type", "auto")),
+        bias_values=_parse_bias_payload(payload.get("bias_values")),
+        active_fraction=float(payload.get("active_fraction", 0.78)),
+        heater_material=str(payload.get("heater_material", "TiN")),
+        heater_width_um=float(payload.get("heater_width_um", 1.60)),
+        heater_thickness_um=float(payload.get("heater_thickness_um", 0.12)),
+        heater_gap_um=float(payload.get("heater_gap_um", 0.90)),
+        heater_offset_um=float(payload.get("heater_offset_um", 0.0)),
+        heater_resistance_ohm=float(payload["heater_resistance_ohm"]) if payload.get("heater_resistance_ohm") not in (None, "") else None,
+        box_thickness_um=float(payload.get("box_thickness_um", 2.00)),
+        top_clad_thickness_um=float(payload.get("top_clad_thickness_um", 1.80)),
+        electrode_config=str(payload.get("electrode_config", "auto")),
+        electrode_gap_um=float(payload["electrode_gap_um"]) if payload.get("electrode_gap_um") not in (None, "") else None,
+        electrode_width_um=float(payload.get("electrode_width_um", 4.00)),
+        na_p_cm3=float(payload.get("na_p_cm3", 5.0e17)),
+        nd_n_cm3=float(payload.get("nd_n_cm3", 5.0e17)),
+        pn_offset_nm=float(payload.get("pn_offset_nm", 25.0)),
+        heavy_contact_offset_um=float(payload.get("heavy_contact_offset_um", 0.85)),
+        carrier_lifetime_ns=float(payload.get("carrier_lifetime_ns", 1.0)),
+    )
+
+
+async def api_active_tuning(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_active_tuning_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+def _export_interconnect_sync(payload: dict) -> dict:
+    cfg = _dict_to_mrr_config(payload.get("config", payload))
+    tune = payload.get("tuning_result")
+    if not isinstance(tune, dict) or "states" not in tune:
+        tune = _active_tuning_sync(payload)
+    GDS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_mat = str(cfg.core_material).replace("-", "")
+    mech = str(tune["efficiency"]["mechanism"])
+    sub_dir = GDS_EXPORT_DIR / f"interconnect_{safe_mat}_{mech}"
+    ic = export_lumerical_interconnect_bundle(cfg, tune, sub_dir, make_zip=True)
+    zp = Path(ic["zip_path"]) if ic.get("zip_path") else None
+    ic["zip_download_url"] = f"/api/download_file?name={zp.name}" if zp else None
+    ic["mechanisms"] = TUNING_MECHANISM_CATALOG
+    return ic
+
+
+async def api_export_interconnect(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        res = await anyio.to_thread.run_sync(_export_interconnect_sync, payload)
+        return JSONResponse(res)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
 async def api_download_file(request: Request) -> Response:
     raw_name = request.query_params.get("name", "")
     safe = _safe_filename(raw_name)
@@ -636,6 +713,8 @@ def create_app() -> Starlette:
         Route("/api/export_sweep_gds", api_export_sweep_gds, methods=["POST"]),
         Route("/api/fab_tolerance", api_fab_tolerance, methods=["POST"]),
         Route("/api/export_fab_gds", api_export_fab_gds, methods=["POST"]),
+        Route("/api/active_tuning", api_active_tuning, methods=["POST"]),
+        Route("/api/export_interconnect", api_export_interconnect, methods=["POST"]),
         Route("/api/download_file", api_download_file, methods=["GET"]),
         Route("/api/demo_spectrum", api_demo_spectrum, methods=["GET"]),
         Route("/api/fit_spectrum", api_fit_spectrum, methods=["POST"]),

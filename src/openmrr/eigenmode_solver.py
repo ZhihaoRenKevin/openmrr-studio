@@ -276,6 +276,7 @@ def solve_modes_fem(
     metallic_boundaries: bool = True,
     export_grid: bool = True,
     mesh_backend: str = "bsd_conformal",
+    spatial_perturbation_fn: Callable[[np.ndarray, np.ndarray, str], tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None,
 ) -> list[EigenmodeResult]:
     """Solve full-vector waveguide or bent-MRR eigenmodes using unstructured FEM.
 
@@ -287,6 +288,9 @@ def solve_modes_fem(
     Args:
       mesh_backend: `"bsd_conformal"` (100% BSD-3-Clause GPL-free exact transfinite
                     conformal mesher).
+      spatial_perturbation_fn: Optional callback `(x_um, y_um, region_name) -> (dn_x, dn_y, dn_z)`
+                    returning complex spatial refractive-index perturbations `Delta_n + 1j * Delta_k`
+                    evaluated discontinuously per subdomain (`ElementDG(ElementTriP1())`).
     """
     if spec.core_material_fn is None or spec.clad_material_fn is None:
         raise ValueError("WaveguideCrossSectionSpec requires core_material_fn and clad_material_fn")
@@ -317,7 +321,6 @@ def solve_modes_fem(
         raise ValueError("element_order must be 1 or 2")
 
     basis = Basis(mesh, elem)
-    basis0 = basis.with_element(ElementTriP0())
 
     # Evaluate material permittivity tensors at (wavelength_m, temperature_k)
     temp_k = spec.temperature_k
@@ -338,17 +341,40 @@ def solve_modes_fem(
     if "cap" in polygons and spec.cap_material_fn is not None:
         region_mats["cap"] = spec.cap_material_fn(wavelength_m, temp_k)
 
-    eps_x_dofs = basis0.zeros(dtype=complex)
-    eps_y_dofs = basis0.zeros(dtype=complex)
-    eps_z_dofs = basis0.zeros(dtype=complex)
+    if spatial_perturbation_fn is None:
+        eps_basis = basis.with_element(ElementTriP0())
+        eps_x_dofs = eps_basis.zeros(dtype=complex)
+        eps_y_dofs = eps_basis.zeros(dtype=complex)
+        eps_z_dofs = eps_basis.zeros(dtype=complex)
 
-    for reg_name, mat_tensor in region_mats.items():
-        if reg_name in mesh.subdomains:
-            dofs = basis0.get_dofs(elements=reg_name)
-            ex_c, ey_c, ez_c = mat_tensor.complex_eps_diag()
-            eps_x_dofs[dofs] = ex_c
-            eps_y_dofs[dofs] = ey_c
-            eps_z_dofs[dofs] = ez_c
+        for reg_name, mat_tensor in region_mats.items():
+            if reg_name in mesh.subdomains:
+                dofs = eps_basis.get_dofs(elements=reg_name)
+                ex_c, ey_c, ez_c = mat_tensor.complex_eps_diag()
+                eps_x_dofs[dofs] = ex_c
+                eps_y_dofs[dofs] = ey_c
+                eps_z_dofs[dofs] = ez_c
+    else:
+        eps_basis = basis.with_element(ElementDG(ElementTriP1()))
+        eps_x_dofs = eps_basis.zeros(dtype=complex)
+        eps_y_dofs = eps_basis.zeros(dtype=complex)
+        eps_z_dofs = eps_basis.zeros(dtype=complex)
+
+        for reg_name, mat_tensor in region_mats.items():
+            if reg_name in mesh.subdomains:
+                idx = np.asarray(eps_basis.get_dofs(elements=reg_name), dtype=np.int64)
+                x_um = eps_basis.doflocs[0, idx] * 1e6
+                y_um = eps_basis.doflocs[1, idx] * 1e6
+                dn_x, dn_y, dn_z = spatial_perturbation_fn(x_um, y_um, reg_name)
+                nx_loc = mat_tensor.nx + np.real(dn_x)
+                ny_loc = mat_tensor.ny + np.real(dn_y)
+                nz_loc = mat_tensor.nz + np.real(dn_z)
+                kx_loc = np.maximum(0.0, mat_tensor.kx + np.imag(dn_x))
+                ky_loc = np.maximum(0.0, mat_tensor.ky + np.imag(dn_y))
+                kz_loc = np.maximum(0.0, mat_tensor.kz + np.imag(dn_z))
+                eps_x_dofs[idx] = (nx_loc + 1j * kx_loc) ** 2
+                eps_y_dofs[idx] = (ny_loc + 1j * ky_loc) ** 2
+                eps_z_dofs[idx] = (nz_loc + 1j * kz_loc) ** 2
 
     k0 = 2.0 * math.pi / wavelength_m
     omega = 2.0 * math.pi * C0_M_PER_S / wavelength_m
@@ -376,9 +402,9 @@ def solve_modes_fem(
         return -(1.0 / rho) * dot(e_t, v_t) / (k0 ** 2)
 
     interp_eps = {
-        "eps_x": basis0.interpolate(eps_x_dofs),
-        "eps_y": basis0.interpolate(eps_y_dofs),
-        "eps_z": basis0.interpolate(eps_z_dofs),
+        "eps_x": eps_basis.interpolate(eps_x_dofs),
+        "eps_y": eps_basis.interpolate(eps_y_dofs),
+        "eps_z": eps_basis.interpolate(eps_z_dofs),
     }
     A = aform.assemble(basis, **interp_eps)
     B = bform.assemble(basis)
@@ -977,3 +1003,250 @@ def run_mesh_convergence_study(
     for r in rows:
         r["abs_delta_neff_vs_finest"] = abs(r["n_eff_real"] - ref_neff)
     return rows
+
+
+def solve_perturbed_neff_sweep_fem(
+    spec: WaveguideCrossSectionSpec,
+    wavelength_m: float,
+    perturbation_fns: list[Callable[[np.ndarray, np.ndarray, str], tuple[np.ndarray, np.ndarray, np.ndarray]] | None],
+    *,
+    bend_radius_m: float = math.inf,
+    polarization: str = "TE0",
+    num_modes: int = 4,
+    n_guess: float | None = None,
+    core_mesh_res_um: float = 0.042,
+    clad_mesh_res_um: float = 0.22,
+    element_order: int = 2,
+) -> list[dict]:
+    """Solve perturbed complex `n_eff` across multiple bias / temperature / E-field states on a shared 2D FEM mesh.
+
+    Assembles the conformal mesh, Nedelec-Lagrange basis, discontinuous linear permittivity
+    basis (`ElementDG(ElementTriP1())`), and magnetic mass matrix `B` once, then tracks the
+    fundamental target polarization mode via complex eigenvector `B`-overlap across states.
+    """
+    if spec.core_material_fn is None or spec.clad_material_fn is None:
+        raise ValueError("WaveguideCrossSectionSpec requires core_material_fn and clad_material_fn")
+
+    from .conformal_mesher import build_conformal_waveguide_mesh
+
+    mesh = build_conformal_waveguide_mesh(
+        spec,
+        core_mesh_res_um=core_mesh_res_um,
+        clad_mesh_res_um=clad_mesh_res_um,
+    )
+    elem = (ElementTriN1() * ElementTriP1()) if element_order == 1 else (ElementTriN2() * ElementTriP2())
+    basis = Basis(mesh, elem)
+    dg1 = basis.with_element(ElementDG(ElementTriP1()))
+    dg_q = basis.with_element(ElementDG(ElementTriP2()))
+
+    temp_k = spec.temperature_k
+    polygons = spec.build_polygons_um()
+    mat_core = spec.core_material_fn(wavelength_m, temp_k)
+    mat_clad = spec.clad_material_fn(wavelength_m, temp_k)
+    mat_top = spec.top_clad_material_fn(wavelength_m, temp_k) if spec.top_clad_material_fn else mat_clad
+
+    region_mats: dict[str, MaterialIndexTensor] = {
+        "box": mat_clad,
+        "top_clad": mat_top,
+    }
+    if "slab" in polygons:
+        region_mats["slab"] = mat_core
+    if "core" in polygons:
+        region_mats["core"] = mat_core
+    if "upper_core" in polygons and spec.upper_core_material_fn is not None:
+        region_mats["upper_core"] = spec.upper_core_material_fn(wavelength_m, temp_k)
+    if "cap" in polygons and spec.cap_material_fn is not None:
+        region_mats["cap"] = spec.cap_material_fn(wavelength_m, temp_k)
+
+    reg_cache: list[tuple[str, MaterialIndexTensor, np.ndarray, np.ndarray, np.ndarray]] = []
+    max_eps_re = 1.0
+    for reg_name, mat_tensor in region_mats.items():
+        if reg_name in mesh.subdomains:
+            idx = np.asarray(dg1.get_dofs(elements=reg_name), dtype=np.int64)
+            x_um = dg1.doflocs[0, idx] * 1e6
+            y_um = dg1.doflocs[1, idx] * 1e6
+            reg_cache.append((reg_name, mat_tensor, idx, x_um, y_um))
+            ex_c, ey_c, _ = mat_tensor.complex_eps_diag()
+            max_eps_re = max(max_eps_re, float(np.real(ex_c)), float(np.real(ey_c)))
+
+    k0 = 2.0 * math.pi / wavelength_m
+    inv_r = 0.0 if not math.isfinite(bend_radius_m) else (1.0 / bend_radius_m)
+
+    @BilinearForm(dtype=complex)
+    def aform(e_t, e_z, v_t, v_z, w):
+        rho = 1.0 + w.x[0] * inv_r
+        eps_xt = w["eps_x"] * rho
+        eps_yt = w["eps_y"] * rho
+        eps_zt = w["eps_z"] / rho
+        mu_t = rho
+        mu_z = 1.0 / rho
+        return (
+            (1.0 / mu_z) * curl(e_t) * curl(v_t) / (k0 ** 2)
+            - (eps_xt * e_t[0] * v_t[0] + eps_yt * e_t[1] * v_t[1])
+            + (1.0 / mu_t) * (grad(e_z)[0] * v_t[0] + grad(e_z)[1] * v_t[1])
+            + (eps_xt * e_t[0] * grad(v_z)[0] + eps_yt * e_t[1] * grad(v_z)[1])
+            - eps_zt * e_z * v_z * (k0 ** 2)
+        )
+
+    @BilinearForm(dtype=complex)
+    def bform(e_t, e_z, v_t, v_z, w):
+        rho = 1.0 + w.x[0] * inv_r
+        return -(1.0 / rho) * dot(e_t, v_t) / (k0 ** 2)
+
+    B = bform.assemble(basis)
+    neg_B = -B
+    d_bndry = basis.get_dofs()
+    zero_x = basis.zeros(dtype=complex)
+    ez_dofs_idx = basis.split_indices()[1]
+
+    q_coords = np.asarray(dg_q.global_coordinates(), dtype=float)
+    rho_quad = 1.0 + q_coords[0] * inv_r
+    dx_quad = basis.dx
+
+    (_, et_basis), _ = basis.split(zero_x)
+    y_mid_m = 0.5 * (spec.h_slab_um + spec.h_film_um) * 1e-6
+    w_core_m = spec.w_bottom_um * 1e-6
+    x_line_m = np.linspace(-0.42 * w_core_m, 0.42 * w_core_m, 61)
+    probe_et_line = et_basis.probes(np.vstack([x_line_m, np.full_like(x_line_m, y_mid_m)]))
+
+    core_elems_list = [
+        mesh.subdomains[k]
+        for k in ("core", "slab", "upper_core")
+        if mesh.subdomains is not None and k in mesh.subdomains
+    ]
+    core_elems = np.unique(np.concatenate(core_elems_list)) if core_elems_list else None
+    want_te = polarization.upper().startswith("TE")
+
+    sigma_init = ((k0 * float(n_guess)) ** 2) if n_guess is not None else ((k0 ** 2) * max_eps_re * 1.02)
+
+    def _assemble_and_solve(
+        fn: Callable[[np.ndarray, np.ndarray, str], tuple[np.ndarray, np.ndarray, np.ndarray]] | None,
+        sigma_val: float,
+        u_ref_norm: np.ndarray | None,
+    ) -> tuple[dict, np.ndarray, float]:
+        eps_x_dofs = dg1.zeros(dtype=complex)
+        eps_y_dofs = dg1.zeros(dtype=complex)
+        eps_z_dofs = dg1.zeros(dtype=complex)
+
+        for reg_name, mat_tensor, idx, x_um, y_um in reg_cache:
+            if fn is None:
+                ex_c, ey_c, ez_c = mat_tensor.complex_eps_diag()
+                eps_x_dofs[idx] = ex_c
+                eps_y_dofs[idx] = ey_c
+                eps_z_dofs[idx] = ez_c
+            else:
+                dn_x, dn_y, dn_z = fn(x_um, y_um, reg_name)
+                nx_loc = mat_tensor.nx + np.real(dn_x)
+                ny_loc = mat_tensor.ny + np.real(dn_y)
+                nz_loc = mat_tensor.nz + np.real(dn_z)
+                kx_loc = np.maximum(0.0, mat_tensor.kx + np.imag(dn_x))
+                ky_loc = np.maximum(0.0, mat_tensor.ky + np.imag(dn_y))
+                kz_loc = np.maximum(0.0, mat_tensor.kz + np.imag(dn_z))
+                eps_x_dofs[idx] = (nx_loc + 1j * kx_loc) ** 2
+                eps_y_dofs[idx] = (ny_loc + 1j * ky_loc) ** 2
+                eps_z_dofs[idx] = (nz_loc + 1j * kz_loc) ** 2
+
+        A = aform.assemble(
+            basis,
+            eps_x=dg1.interpolate(eps_x_dofs),
+            eps_y=dg1.interpolate(eps_y_dofs),
+            eps_z=dg1.interpolate(eps_z_dofs),
+        )
+        eig_solver = solver_eigen_scipy(k=num_modes, sigma=sigma_val)
+        lams, xs = solve(*condense(-A, -B, D=d_bndry, x=zero_x), solver=eig_solver)
+        betas_raw = np.sqrt(lams.astype(complex))
+        betas_raw = np.where(np.real(betas_raw) < 0, -betas_raw, betas_raw)
+        order_idx = np.argsort(-np.real(betas_raw / k0))
+        xs = xs[:, order_idx]
+        betas = betas_raw[order_idx]
+
+        # Evaluate polarization, node count & reference B-overlap for each candidate mode
+        candidates: list[tuple[int, float, int, float, np.ndarray]] = []
+        for m_i in range(len(betas)):
+            u_raw = xs[:, m_i]
+            bu = neg_B @ u_raw
+            b_norm = math.sqrt(max(float(np.real(np.vdot(u_raw, bu))), 1e-30))
+            u_unit = u_raw / b_norm
+            ov = float(abs(np.vdot(u_ref_norm, neg_B @ u_unit))) if u_ref_norm is not None else 1.0
+
+            (et_v, _), _ = basis.split(u_raw)
+            et_df = et_basis.interpolate(et_v)
+            et_arr = np.asarray(et_df, dtype=complex)
+            ex2_i = float(np.sum((np.abs(et_arr[0]) ** 2) * dx_quad))
+            ey2_i = float(np.sum((np.abs(et_arr[1]) ** 2) * dx_quad))
+            te_f = ex2_i / max(ex2_i + ey2_i, 1e-30)
+
+            et_ln = (probe_et_line @ et_v).reshape(2, -1)
+            l_comp = et_ln[0] if te_f >= 0.5 else et_ln[1]
+            ipk = int(np.argmax(np.abs(l_comp)))
+            if abs(l_comp[ipk]) > 0:
+                l_re = np.real(l_comp * np.exp(-1j * np.angle(l_comp[ipk])))
+                sig = l_re[np.abs(l_re) >= 0.08 * float(np.max(np.abs(l_re)))]
+                nd = int(np.sum(sig[:-1] * sig[1:] < 0.0)) if len(sig) >= 2 else 0
+            else:
+                nd = 0
+            candidates.append((m_i, te_f, nd, ov, u_unit))
+
+        if u_ref_norm is None:
+            pol_cands = [c for c in candidates if (c[1] >= 0.5) == want_te]
+            fund_cands = [c for c in pol_cands if c[2] == 0]
+            chosen = (fund_cands or pol_cands or candidates)[0]
+        else:
+            # Lock onto continuous mode branch via transverse B-inner-product overlap
+            pol_cands = [c for c in candidates if (c[1] >= 0.35 if want_te else c[1] <= 0.65)]
+            pool = pol_cands if pol_cands else candidates
+            chosen = max(pool, key=lambda c: c[3])
+
+        sel_i, te_frac, nodes, ov_val, u_sel_unit = chosen
+        beta_sel = complex(betas[sel_i])
+        neff_sel = beta_sel / k0
+
+        u_phys = xs[:, sel_i].copy()
+        u_phys[ez_dofs_idx] /= 1j * (beta_sel / (k0 ** 2))
+        (er_df, ey_df), ez_df = basis.interpolate(u_phys)
+        er_q = np.asarray(er_df, dtype=complex)
+        ey_q = np.asarray(ey_df, dtype=complex)
+        ez_q = np.asarray(ez_df, dtype=complex) / rho_quad
+
+        ex2_int = float(np.sum((np.abs(er_q) ** 2) * dx_quad))
+        ey2_int = float(np.sum((np.abs(ey_q) ** 2) * dx_quad))
+        ez2_int = float(np.sum((np.abs(ez_q) ** 2) * dx_quad))
+        et4_int = float(np.sum(((np.abs(er_q) ** 2 + np.abs(ey_q) ** 2) ** 2) * dx_quad))
+        a_eff_um2 = ((ex2_int + ey2_int) ** 2 / max(et4_int, 1e-30)) * 1e12
+
+        if core_elems is not None:
+            e_tot_q = (np.abs(er_q) ** 2 + np.abs(ey_q) ** 2 + np.abs(ez_q) ** 2) * dx_quad
+            gamma_core = float(np.sum(e_tot_q[core_elems]) / max(ex2_int + ey2_int + ez2_int, 1e-30))
+        else:
+            gamma_core = 0.80
+
+        neff_re = float(np.real(neff_sel))
+        neff_im = float(max(0.0, abs(np.imag(neff_sel))))
+        alpha_modal_db_cm = (10.0 / math.log(10.0)) * (4.0 * math.pi * neff_im / wavelength_m) * 1e-2
+
+        info = {
+            "n_eff": complex(neff_re, neff_im),
+            "neff_real": neff_re,
+            "neff_imag": neff_im,
+            "alpha_modal_db_per_cm": alpha_modal_db_cm,
+            "te_fraction": float(te_frac),
+            "core_confinement": float(gamma_core),
+            "a_eff_um2": float(a_eff_um2),
+            "ex_core_nodes": int(nodes),
+            "mode_overlap": float(ov_val),
+        }
+        return info, u_sel_unit, (k0 * neff_re) ** 2
+
+    ref_info, u_ref, sigma_ref = _assemble_and_solve(None, sigma_init, None)
+
+    out_rows: list[dict] = []
+    cur_u = u_ref
+    cur_sigma = sigma_ref
+    for fn in perturbation_fns:
+        if fn is None:
+            out_rows.append(dict(ref_info))
+        else:
+            row, cur_u, cur_sigma = _assemble_and_solve(fn, cur_sigma, cur_u)
+            out_rows.append(row)
+    return out_rows
+

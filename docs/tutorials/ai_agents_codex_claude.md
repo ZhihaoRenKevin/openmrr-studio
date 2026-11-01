@@ -28,7 +28,7 @@ Above the chat box in OpenMRR Studio, select any of the 4 AI modes at any time:
    ```
 
 ### Claude Code & Claude Desktop
-1. Opening `openmrr-studio` in `claude` automatically detects [`.mcp.json`](../../.mcp.json), exposing all 7 `openmrr_*` MCP tools (`openmrr_status`, `openmrr_width_cutoff`, `openmrr_design_mrr`, `openmrr_sweep_mrr`, `openmrr_fab_tolerance`, `openmrr_inspect_gds`, `openmrr_fit_spectrum`).
+1. Opening `openmrr-studio` in `claude` automatically detects [`.mcp.json`](../../.mcp.json), exposing all 8 `openmrr_*` MCP tools (`openmrr_status`, `openmrr_width_cutoff`, `openmrr_design_mrr`, `openmrr_sweep_mrr`, `openmrr_fab_tolerance`, `openmrr_active_tuning`, `openmrr_inspect_gds`, `openmrr_fit_spectrum`).
 2. For Claude Desktop (`claude_desktop_config.json`):
    ```json
    {

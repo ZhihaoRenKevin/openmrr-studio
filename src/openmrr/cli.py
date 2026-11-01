@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from .agent_tools import (
+    agent_active_tuning,
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
@@ -135,6 +136,29 @@ def main() -> None:
     p_at.add_argument("--bias-gds", action="store_true", dest="export_bias_gds")
     p_at.add_argument("--json", type=str, default=None, dest="raw_json")
 
+    p_tu = ag_sub.add_parser("active-tuning", help="2D-FEM TO/EO/Si-PN/Si-PIN tuning (V/I/T/E) & Lumerical INTERCONNECT export")
+    p_tu.add_argument("--mech", default="auto", dest="mechanism", help="auto | si_pn_depletion | pockels_eo | thermo_optic | si_pin_injection")
+    p_tu.add_argument("--drive", default="auto", dest="drive_type", help="auto | voltage_v | current_ma | power_mw | delta_temp_k | e_field_v_per_um")
+    p_tu.add_argument("--biases", default=None, dest="bias_values", help="Comma-separated values, e.g. '0,-1,-2,-4,-6'")
+    p_tu.add_argument("--top", default="point_circular_ap")
+    p_tu.add_argument("--mat", default="Si")
+    p_tu.add_argument("--h", type=float, default=None, dest="h_um")
+    p_tu.add_argument("--slab", type=float, default=None, dest="slab_um")
+    p_tu.add_argument("--w-ring", type=float, default=None, dest="w_ring_um")
+    p_tu.add_argument("--w-bus", type=float, default=None, dest="w_bus_um")
+    p_tu.add_argument("--r", type=float, default=None, dest="r_um")
+    p_tu.add_argument("--gap", type=float, default=None, dest="gap_um")
+    p_tu.add_argument("--wl", type=float, default=None, dest="wl_nm")
+    p_tu.add_argument("--heater-gap", type=float, default=0.90, dest="heater_gap_um")
+    p_tu.add_argument("--box", type=float, default=2.00, dest="box_thickness_um")
+    p_tu.add_argument("--eo-gap", type=float, default=None, dest="electrode_gap_um")
+    p_tu.add_argument("--na", type=float, default=5.0e17, dest="na_p_cm3")
+    p_tu.add_argument("--nd", type=float, default=5.0e17, dest="nd_n_cm3")
+    p_tu.add_argument("--pn-offset", type=float, default=25.0, dest="pn_offset_nm")
+    p_tu.add_argument("--cc", action="store_true", dest="apply_cc")
+    p_tu.add_argument("--interconnect", action="store_true", dest="export_interconnect")
+    p_tu.add_argument("--json", type=str, default=None, dest="raw_json")
+
     args = parser.parse_args()
 
     if args.cmd in (None, "app"):
@@ -191,6 +215,8 @@ def main() -> None:
             _print_compact(agent_sweep_mrr(d))
         elif args.agent_cmd == "fab-tolerance":
             _print_compact(agent_fab_tolerance(d))
+        elif args.agent_cmd == "active-tuning":
+            _print_compact(agent_active_tuning(d))
 
 
 if __name__ == "__main__":

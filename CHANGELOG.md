@@ -2,6 +2,18 @@
 
 All notable changes to **OpenMRR Studio** are documented in this file.
 
+## [3.4.0] - 2026-11-01
+
+### Added
+- **Native 2D-FEM Multiphysics Active Tuning Engine (`active_tuning.py`, `eigenmode_solver.py` - Zero COMSOL)**:
+  - Added spatial complex refractive-index perturbation `solve_perturbed_neff_sweep_fem` (`ElementDG(ElementTriP1())` inside the 2nd-order curl-conforming `Nedelec1 * Lagrange P2` Maxwell FEM solver) with complex transverse `B`-inner-product eigenvector tracking across arbitrary multi-state sweeps on a single shared mesh.
+  - Added **2D Fourier Heat Conduction FEM (`solve_2d_heater_thermal_fem`)** solving $-\nabla\cdot(\kappa_{\mathrm{th}}\nabla \Delta T) = Q_{\mathrm{vol}}$ across the actual heater cross-section (`TiN`, `Pt`, `W`, `NiCr`, `doped_Si`), heater width/thickness/gap/offset, and buried oxide (`BOX`) thickness above the isothermal Si handle substrate to extract $R_{\mathrm{th}}$ (`K/mW`), $R_{\mathrm{elec}}$ (`Ohm`), $\tau_{\mathrm{th}}$ (`us`), $f_{3\mathrm{dB,TO}}$ (`kHz`), and $P_\pi$ (`mW`), plus direct temperature $\Delta T$ (`K`) input.
+  - Added **2D Anisotropic Electrostatic Laplace FEM (`solve_2d_electrostatic_eo_fem`)** solving $-\nabla\cdot(\varepsilon_0\boldsymbol{\varepsilon}_{\mathrm{DC}}\nabla\phi) = 0$ on coplanar `GSG` or vertical electrode geometries (`electrode_gap_um`, `electrode_width_um`, `electrode_thickness_um`) with dielectric screening, crystal-axis tensor projection (`LN_Xcut`, `LN_Zcut`, `4H-SiC`, `3C-SiC`, `AlN`, `ScAlN`, `GaN`), line capacitance $C_{\mathrm{elec}}$ (`fF/um`), 50-Ohm RC bandwidth, and $V_\pi L$ (`V*cm`), plus direct electric-field $E$ (`V/um`) input.
+  - Added **2D Silicon Lateral PN Depletion (`si_pn_depletion`) & PIN Forward Injection (`si_pin_injection`)** modeling Poisson depletion width $W_{\mathrm{dep}}(V)$, Debye-screened carrier profiles $(p(x,y), n(x,y))$, `p++`/`n++` contact wings, slab series resistance $R_s$, junction capacitance $C_j(V)$, RC/carrier-lifetime $f_{3\mathrm{dB,EO}}$, and Soref-Bennett / Nedeljkovic complex plasma dispersion $\Delta n + i\Delta k$ (capturing simultaneous phase shift and modal free-carrier absorption in `dB/cm`).
+- **Turnkey Ansys Lumerical INTERCONNECT Compact Model Exporter (`export_lumerical_interconnect_bundle`)**:
+  - Exports verified passive multi-port S-parameters (`openmrr_passive_sparams.dat` for `Optical N-Port S-Parameter` with strictly ascending frequency `[Hz]`, unwrapped phase, and passivity check $\sum |S|^2 \le 1$), active complex index perturbation tables (`openmrr_active_neff_table.txt` for `Optical Modulator Measured` with strictly ascending SI bias and $\mathrm{Im}(n_{\mathrm{eff}}) \ge 0$), automated INTERCONNECT circuit builder (`build_openmrr_interconnect.lsf`), Python `lumapi.INTERCONNECT()` runner (`run_interconnect_lumapi.py`), CSVs, and single-click `.zip` bundles.
+  - Integrated across the Desktop/Web UI (`⚡ Tuning & IC` tab), Bilingual Copilot (`EN | 中文`), Agent CLI (`openmrr agent active-tuning --interconnect`), MCP server (`openmrr_active_tuning`), Cookbook `05` (`05_active_tuning_pn_eo_to_interconnect.py`), and Test Suite `11`.
+
 ## [3.3.0] - 2026-11-01
 
 ### Added

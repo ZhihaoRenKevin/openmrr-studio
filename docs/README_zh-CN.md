@@ -20,7 +20,10 @@
 
 1. **6 步引导式中英双语光子设计助手（`EN | 中文` 一键切换）**：
    告别复杂的参数面板，每次只问一个清晰问题（`1. 选择目标` $\rightarrow$ `2. 工作波段` $\rightarrow$ `3. 波导材料` $\rightarrow$ `4. 晶圆截面与单模截止` $\rightarrow$ `5. 传播损耗 dB/cm` $\rightarrow$ `6. 微环拓扑、目标 FSR、临界耦合与 GDS 导出`），顶部可随时一键切换中英文。
-2. **洁净室光刻过曝/欠曝（`正胶 Positive PR` vs `负胶 Negative PR`）与 CD 工艺容差引擎（`v3.3.0` 新增）**：
+2. **纯自研 2D-FEM 多物理场有源调谐（`TO` / `EO` / `硅 PN-PIN`）与 Ansys Lumerical INTERCONNECT 导出（`v3.4.0` 新增，零 COMSOL 依赖）**：
+   - **截面多物理场有限元全自研**：内置 **2D Fourier 热传导有限元**（关联微加热器材质/宽度/间距与埋氧层 `BOX` 厚度，直接给出 $R_{\mathrm{th}}$、$P_\pi$ 与 $f_{3\mathrm{dB,TO}}$）、**2D 各向异性 Laplace 静电场有限元**（关联共面 `GSG` 或垂直电极间距与介电屏蔽，给出 $V_\pi L$ 与电光电容带宽）以及 **2D 硅横向 PN 耗尽 / PIN 注入模型**（Soref-Bennett 复数等离子体色散 $\Delta n + i\Delta k$，同步捕获谐振漂移与自由载流子吸收 FCA）。
+   - **支持 `电压 V / 电流 mA / 功率 mW / 直接温升 ΔT [K] / 直接电场 E [V/µm]` 多态光谱与 INTERCONNECT 紧凑模型一键打包**：将二维复折射率分布实时送入 2D 保形全矢量 Maxwell 本征模求解器，并一键导出经过无源性与单调频率校验的 **Lumerical INTERCONNECT** 压缩包（`SPAR .dat`、`OMM n_eff .txt`、自动建图 `.lsf` 与 `lumapi` 脚本）。
+3. **洁净室光刻过曝/欠曝（`正胶 Positive PR` vs `负胶 Negative PR`）与 CD 工艺容差引擎**：
    - **真实正负胶物理耦合**：内置 **正胶（ZEP520A / PMMA / KrF / ArF）**（过曝使波导宽度 $W$ 变窄、耦合间距 $\mathrm{gap}$ 变宽 $\rightarrow$ 欠耦合且谐振蓝移）与 **负胶（HSQ / ma-N 2403 / SU-8）**（过曝使波导展宽、间距收缩 $\rightarrow$ 过耦合、谐振红移及 `< 80 nm` 粘连/RIE lag 告警）全矢量 FEM + 空间 CMT 联立评估。
    - **良率窗口与一键导出 5 单元预偏置补偿版图（Pre-Biased `.GDS`）**：自动给出 `ER >= 15 dB` 剂量/线宽容差窗口、谐振漂移灵敏度 $d\lambda_0/d\mathrm{CD}$（`pm/nm`）、TiN 热调谐补偿温升 $\Delta T$，并一键导出 `[-20, -10, 0, +10, +20] nm` 五档光刻预补偿微环阵列 `.gds` + KLayout `.lyp`。
 3. **双向波导传播损耗（`dB/cm`）设计与实验光谱反演**：
@@ -46,8 +49,8 @@
 
 | 操作系统 | 安装包文件 | 安装与首次打开方法 |
 | :--- | :--- | :--- |
-| **macOS（Apple Silicon）** | [**`OpenMRR-Studio-v3.3.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | 双击打开 `.dmg`，将 **`OpenMRR Studio.app`** 拖入 **`Applications（应用程序）`**。*（首次打开开源未公证应用时，请右键点击 **`OpenMRR Studio.app`** $\rightarrow$ 选择 **打开（Open）**，或在 **系统设置 $\rightarrow$ 隐私与安全性** 中点击“仍要打开”。）* |
-| **Windows 10 / 11（64位）** | **`OpenMRR-Studio-v3.3.0-Windows-Setup-x64.exe`** *（或免安装 `.zip`）* | 双击运行 **`Setup.exe`** 安装向导（无需管理员密码，自动创建桌面与开始菜单快捷方式）；也可按下方“方式三”下载源码 ZIP 后双击 `launchers\OpenMRR_Windows.bat` 一键自动配置。 |
+| **macOS（Apple Silicon）** | [**`OpenMRR-Studio-v3.4.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | 双击打开 `.dmg`，将 **`OpenMRR Studio.app`** 拖入 **`Applications（应用程序）`**。*（首次打开开源未公证应用时，请右键点击 **`OpenMRR Studio.app`** $\rightarrow$ 选择 **打开（Open）**，或在 **系统设置 $\rightarrow$ 隐私与安全性** 中点击“仍要打开”。）* |
+| **Windows 10 / 11（64位）** | **`OpenMRR-Studio-v3.4.0-Windows-Setup-x64.exe`** *（或免安装 `.zip`）* | 双击运行 **`Setup.exe`** 安装向导（无需管理员密码，自动创建桌面与开始菜单快捷方式）；也可按下方“方式三”下载源码 ZIP 后双击 `launchers\OpenMRR_Windows.bat` 一键自动配置。 |
 
 *（独立桌面版导出的 `.gds` 版图、`.lyp` 图层配色与 `.csv` 光谱默认保存在本地 `~/Documents/OpenMRR_Studio/` 目录。）*
 
@@ -169,6 +172,9 @@ python examples/01_devices_and_sweeps/03_multiband_vis_1310_midir.py
 # 3c. 正胶 vs 负胶光刻剂量过曝/欠曝分析与 5 单元预偏置补偿 .gds 导出：
 python examples/01_devices_and_sweeps/04_lithography_dose_pr_tolerance.py
 
+# 3d. 纯自研 2D-FEM 有源调谐 (硅 PN / Pockels EO / 热光加热器 + ΔT / E) 与 Lumerical INTERCONNECT 导出：
+python examples/01_devices_and_sweeps/05_active_tuning_pn_eo_to_interconnect.py
+
 # 4. 生成单微环版图及 5 器件 MPW 扫参阵列 .gds + KLayout .lyp：
 python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
 
@@ -178,7 +184,7 @@ python examples/02_gds_roundtrip/02_upload_and_simulate_gds.py
 # 6. 实验透射谱拟合（背向散射双峰劈裂 Q_int / Q_ext / 2g 与多 FSR 群折射率提取）：
 python examples/03_lab_spectrum_fitting/01_fit_doublet_and_multifsr.py
 
-# 运行全套 10 项自动化物理与接口验证测试：
+# 运行全套 11 项自动化物理与接口验证测试：
 python tests/test_openmrr_all.py
 ```
 

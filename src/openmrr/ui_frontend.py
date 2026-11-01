@@ -463,6 +463,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         <button class="stage-pill" id="pill-gds" onclick="setStageView('gds')" data-i18n="pill_gds">📐 GDS Mask</button>
         <button class="stage-pill" id="pill-fit" onclick="setStageView('fit')" data-i18n="pill_fit">📈 Loss &amp; Q Fit</button>
         <button class="stage-pill" id="pill-fab" onclick="setStageView('fab'); if(!lastFabResult) runFabToleranceUI();" data-i18n="pill_fab">🧪 Fab &amp; Dose</button>
+        <button class="stage-pill" id="pill-tuning" onclick="setStageView('tuning'); if(!lastTuningResult) runActiveTuningUI();" data-i18n="pill_tuning">⚡ Tuning &amp; IC</button>
       </div>
       <span class="stage-status" id="spec-status" data-i18n="status_ready">Ready · 400 nm – 14 µm</span>
     </div>
@@ -597,6 +598,7 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
 
         <div class="action-bar">
           <button class="btn green sm" onclick="sendChatPrompt(currentLang==='zh'?'临界耦合':'Apply critical coupling')" data-i18n="mrr_btn_cc">⚡ Apply Critical Coupling</button>
+          <button class="btn amber sm" onclick="setStageView('tuning'); runActiveTuningUI();" data-i18n="mrr_btn_tune">🎛️ Active Tuning &amp; INTERCONNECT</button>
           <button class="btn sm" onclick="setStageView('fab'); runFabToleranceUI();" data-i18n="mrr_btn_fab">🧪 Fab / PR Dose Error</button>
           <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描间距':'Sweep gap')" data-i18n="mrr_btn_sw_gap">📏 Sweep Gap</button>
           <button class="btn sm" onclick="sendChatPrompt(currentLang==='zh'?'扫描损耗':'Sweep propagation loss')" data-i18n="mrr_btn_sw_loss">📉 Sweep Loss (dB/cm)</button>
@@ -845,6 +847,135 @@ table.clean-tbl tr:hover { background: rgba(56,189,248,0.08); }
         </div>
       </div>
 
+      <!-- ==================== STAGE 7: 2D-FEM ACTIVE TUNING (TO / EO / SI-PN) & LUMERICAL INTERCONNECT ==================== -->
+      <div class="stage-view" id="view-tuning">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="tune_card_title">2D-FEM Active Tuning (TO / EO / Si PN-PIN) &amp; Ansys Lumerical INTERCONNECT Export (Zero COMSOL)</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <button class="btn primary sm" onclick="runActiveTuningUI()" data-i18n="tune_btn_run">▶ Solve 2D-FEM Tuning &amp; Spectra</button>
+              <button class="btn green sm" onclick="exportInterconnectUI()" data-i18n="tune_btn_ic">📦 Export Lumerical INTERCONNECT (.ZIP)</button>
+              <span id="ic-download-slot"></span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.55fr 1.25fr 1.2fr;gap:10px;align-items:end;">
+            <div class="field">
+              <label data-i18n="tune_lbl_mech">Physical Tuning Mechanism</label>
+              <select id="tune-mech" onchange="onTuneControlChange('mech')">
+                <option value="auto" data-i18n="tune_opt_auto">Auto-Select by Platform (Si PN / Pockels EO / TO Heater)</option>
+                <option value="si_pn_depletion" data-i18n="tune_opt_pn">Silicon Lateral PN Depletion (Soref-Bennett + 2D FEM)</option>
+                <option value="pockels_eo" data-i18n="tune_opt_eo">Anisotropic Pockels EO (2D Laplace FEM / Direct E)</option>
+                <option value="thermo_optic" data-i18n="tune_opt_to">Thermo-Optic Microheater (2D Fourier FEM / Direct ΔT)</option>
+                <option value="si_pin_injection" data-i18n="tune_opt_pin">Silicon PIN Forward Injection (Carrier Plasma + FCA)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_drive">Input Drive / Physical Field</label>
+              <select id="tune-drive" onchange="onTuneControlChange('drive')">
+                <option value="auto" data-i18n="tune_drv_auto">Auto Default Drive</option>
+                <option value="voltage_v" data-i18n="tune_drv_v">Voltage V [V] (2D Geometry-Coupled)</option>
+                <option value="current_ma" data-i18n="tune_drv_i">Current I [mA] (2D Geometry-Coupled)</option>
+                <option value="power_mw" data-i18n="tune_drv_p">Heater Power P [mW] (2D Fourier FEM)</option>
+                <option value="delta_temp_k" data-i18n="tune_drv_t">Direct Temperature Shift ΔT [K]</option>
+                <option value="e_field_v_per_um" data-i18n="tune_drv_e">Direct Electric Field E [V/µm]</option>
+              </select>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_biases">Bias / T / E Sweep Values</label>
+              <input id="tune-biases" type="text" value="" placeholder="Auto (e.g. 0, -2, -5 or 0, 20, 50)"/>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;align-items:end;margin-top:10px;">
+            <div class="field">
+              <label data-i18n="tune_lbl_hgap">Heater Gap [µm]</label>
+              <input id="tune-hgap" type="number" step="0.1" value="0.90"/>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_box">BOX Oxide [µm]</label>
+              <input id="tune-box" type="number" step="0.2" value="2.00"/>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_egap">EO Gap G [µm]</label>
+              <input id="tune-egap" type="number" step="0.25" placeholder="Auto"/>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_doping">Si PN N_A=N_D [cm⁻³]</label>
+              <input id="tune-doping" type="text" value="5e17"/>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_pnoff">PN Offset [nm]</label>
+              <input id="tune-pnoff" type="number" step="5" value="25"/>
+            </div>
+            <div class="field">
+              <label data-i18n="tune_lbl_fact">Active Fraction</label>
+              <input id="tune-fact" type="number" step="0.05" min="0.1" max="1.0" value="0.78"/>
+            </div>
+          </div>
+
+          <div id="tune-geom-banner" style="margin-top:10px;padding:9px 12px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.28);font-size:12px;color:#cbd5e1;line-height:1.5;">
+            Pure-Python 2D-FEM multiphysics (Fourier heat conduction, anisotropic Laplace electrostatics, or Debye-screened Silicon PN/PIN junction) feeds spatial <code>n(x,y) + i·k(x,y)</code> directly into the 2D vector Maxwell eigenmode solver with zero COMSOL dependency.
+          </div>
+        </div>
+
+        <div class="kpi-row four">
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="tune_kpi1">Device Tuning Slope</div>
+            <div class="kpi-val cyan" id="tune-kpi-slope">--</div>
+            <div class="kpi-sub" id="tune-kpi-fslope">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="tune_kpi2">π-Phase-Shift Figure</div>
+            <div class="kpi-val green" id="tune-kpi-pi">--</div>
+            <div class="kpi-sub" id="tune-kpi-pi-sub">V_π·L / P_π / ΔT_π / E_π</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="tune_kpi3">3-dB Modulation BW</div>
+            <div class="kpi-val amber" id="tune-kpi-bw">--</div>
+            <div class="kpi-sub" id="tune-kpi-bw-sub">RC / Thermal Cutoff</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-lbl" data-i18n="tune_kpi4">2D-FEM Geometry Coupling</div>
+            <div class="kpi-val" id="tune-kpi-geom">--</div>
+            <div class="kpi-sub" id="tune-kpi-geom-sub">Cross-Section PDE</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" data-i18n="tune_plot1_title">Multi-State Transmission Spectra (V / I / ΔT / E)</span>
+              <span class="card-sub" id="tune-plot1-sub">Perturbed 2D-FEM Eigenmode + CMT</span>
+            </div>
+            <canvas class="plot-cv" id="cv-tune-spec"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="card-title" data-i18n="tune_plot2_title">Resonance Shift Δλ [pm] &amp; Active Loss α [dB/cm]</span>
+              <span class="card-sub" id="tune-plot2-sub">Solid Cyan = Δλ · Dashed Amber = α</span>
+            </div>
+            <canvas class="plot-cv" id="cv-tune-shift"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" data-i18n="tune_tbl_title">State-by-State Perturbed 2D-FEM Eigenmode &amp; Resonance Breakdown</span>
+            <span class="card-sub" id="tune-tbl-sub">Lumerical INTERCONNECT SPAR + OMM Ready</span>
+          </div>
+          <table class="clean-tbl" id="tune-table">
+            <thead>
+              <tr>
+                <th>Drive State</th><th>Core Field / Junction</th><th>Re(n_eff)</th><th>Δn_eff [×10⁻⁴]</th>
+                <th>Total α [dB/cm]</th><th>Δλ_res [pm]</th><th>ER [dB]</th><th>Loaded Q_L</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -947,6 +1078,7 @@ let currentGdsView = null;
 let labSpectrumData = null;
 let lastExtractedLossDbCm = null;
 let lastFabResult = null;
+let lastTuningResult = null;
 let aiBackendStatus = { offline: true, ollama_available: false, claude_cli_available: false, claude_env_key: false, codex_cli_available: false, codex_env_key: false };
 
 const UI_I18N = {
@@ -961,7 +1093,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 Online · Codex / OpenAI (CLI / API)',
     chat_placeholder: "Type an answer or spec (e.g. 'loss = 0.8 dB/cm, FSR 150 GHz, pulley')...",
     btn_send: 'Send →',
-    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit', pill_fab: '🧪 Fab & Dose',
+    pill_overview: '📋 Blueprint', pill_mode: '🔬 2D Mode', pill_mrr: '📊 Ring Spectrum', pill_gds: '📐 GDS Mask', pill_fit: '📈 Loss & Q Fit', pill_fab: '🧪 Fab & Dose', pill_tuning: '⚡ Tuning & IC',
     status_ready: 'Ready · 400 nm – 14 µm',
     wf1_title: '1. Design a New Ring Step-by-Step',
     wf1_desc: 'Answer one simple question at a time — waveband, material, wafer stack, propagation loss (<code>dB/cm</code>), and target FSR.',
@@ -975,7 +1107,7 @@ const UI_I18N = {
     mode_lbl_sm: 'Single-Mode Max Width', mode_lbl_wbus: 'Recommended Bus W', mode_lbl_wring: 'Recommended Ring W', mode_lbl_neff: 'Fundamental Mode',
     mode_card_field: '2D Vector Eigenmode Field', mode_card_cutoff: 'Waveguide Width Dispersion & Cutoff',
     mrr_lbl_fsr: 'Free Spectral Range', mrr_lbl_loss: 'Prop. Loss α & Q_int', mrr_lbl_ql: 'Loaded Q Factor', mrr_lbl_er: 'Extinction Ratio', mrr_lbl_cc: 'Critical Coupling',
-    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_fab: '🧪 Fab / PR Dose Error', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
+    mrr_btn_cc: '⚡ Apply Critical Coupling', mrr_btn_tune: '🎛️ Active Tuning & INTERCONNECT', mrr_btn_fab: '🧪 Fab / PR Dose Error', mrr_btn_sw_gap: '📏 Sweep Gap', mrr_btn_sw_loss: '📉 Sweep Loss (dB/cm)',
     mrr_btn_gds: '💾 Export .GDS Mask', mrr_btn_csv: '📥 Download Spectrum .CSV',
     mrr_card_spec: 'Broadband Transmission Spectrum', mrr_card_coupler: 'Coupler Critical-Coupling Synthesis', mrr_card_schem: 'Resonator & Cross-Section Schematic',
     gds_btn_up: '📂 Upload .GDS / .OAS', gds_btn_single: '💾 Generate Single .GDS', gds_btn_array: '🗂️ Generate 5-Ring Sweep Array .GDS',
@@ -1000,7 +1132,23 @@ const UI_I18N = {
     fab_kpi1: 'ER ≥ 15 dB Yield Window', fab_kpi2: 'Over-Dose (+Max) Corner', fab_kpi3: 'Under-Dose (-Max) Corner', fab_kpi4: 'Resonance CD Sensitivity',
     fab_plot1_title: 'Extinction Ratio & Resonance Shift vs. Exposure Dose / CD', fab_plot1_sub: 'Green Band = ER ≥ 15 dB Yield Window',
     fab_plot2_title: '3-Corner Overlaid Resonance Dips', fab_plot2_sub: 'Under-Dose vs. Nominal vs. Over-Dose',
-    fab_tbl_title: 'Corner-by-Corner Lithography & Coupling Breakdown'
+    fab_tbl_title: 'Corner-by-Corner Lithography & Coupling Breakdown',
+    tune_card_title: '2D-FEM Active Tuning (TO / EO / Si PN-PIN) & Ansys Lumerical INTERCONNECT Export (Zero COMSOL)',
+    tune_btn_run: '▶ Solve 2D-FEM Tuning & Spectra', tune_btn_ic: '📦 Export Lumerical INTERCONNECT (.ZIP)',
+    tune_lbl_mech: 'Physical Tuning Mechanism', tune_lbl_drive: 'Input Drive / Physical Field', tune_lbl_biases: 'Bias / T / E Sweep Values',
+    tune_opt_auto: 'Auto-Select by Platform (Si PN / Pockels EO / TO Heater)',
+    tune_opt_pn: 'Silicon Lateral PN Depletion (Soref-Bennett + 2D FEM)',
+    tune_opt_eo: 'Anisotropic Pockels EO (2D Laplace FEM / Direct E)',
+    tune_opt_to: 'Thermo-Optic Microheater (2D Fourier FEM / Direct ΔT)',
+    tune_opt_pin: 'Silicon PIN Forward Injection (Carrier Plasma + FCA)',
+    tune_drv_auto: 'Auto Default Drive', tune_drv_v: 'Voltage V [V] (2D Geometry-Coupled)', tune_drv_i: 'Current I [mA] (2D Geometry-Coupled)',
+    tune_drv_p: 'Heater Power P [mW] (2D Fourier FEM)', tune_drv_t: 'Direct Temperature Shift ΔT [K]', tune_drv_e: 'Direct Electric Field E [V/µm]',
+    tune_lbl_hgap: 'Heater Gap [µm]', tune_lbl_box: 'BOX Oxide [µm]', tune_lbl_egap: 'EO Gap G [µm]',
+    tune_lbl_doping: 'Si PN N_A=N_D [cm⁻³]', tune_lbl_pnoff: 'PN Offset [nm]', tune_lbl_fact: 'Active Fraction',
+    tune_kpi1: 'Device Tuning Slope', tune_kpi2: 'π-Phase-Shift Figure', tune_kpi3: '3-dB Modulation BW', tune_kpi4: '2D-FEM Geometry Coupling',
+    tune_plot1_title: 'Multi-State Transmission Spectra (V / I / ΔT / E)',
+    tune_plot2_title: 'Resonance Shift Δλ [pm] & Active Loss α [dB/cm]',
+    tune_tbl_title: 'State-by-State Perturbed 2D-FEM Eigenmode & Resonance Breakdown'
   },
   zh: {
     step1: '选择目标', step2: '工作波段', step3: '芯层材料', step4: '叠层与模式', step5: '损耗与微环', step6: '耦合优化与版图',
@@ -1013,7 +1161,7 @@ const UI_I18N = {
     ai_opt_codex: '🟢 在线模式 · Codex / OpenAI (CLI / API)',
     chat_placeholder: '输入您的需求或参数（例如：损耗 0.8 dB/cm, FSR 150 GHz, 滑轮耦合）...',
     btn_send: '发送 →',
-    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合', pill_fab: '🧪 工艺与剂量',
+    pill_overview: '📋 设计蓝图', pill_mode: '🔬 二维模式', pill_mrr: '📊 微环光谱', pill_gds: '📐 GDS 版图', pill_fit: '📈 损耗与Q拟合', pill_fab: '🧪 工艺与剂量', pill_tuning: '⚡ 调谐与 IC',
     status_ready: '就绪 · 400 nm – 14 µm',
     wf1_title: '1. 逐步引导设计新微环',
     wf1_desc: '每次只问一个清晰问题——工作波段、波导材料、晶圆叠层、传播损耗 (<code>dB/cm</code>) 与目标 FSR。',
@@ -1027,7 +1175,7 @@ const UI_I18N = {
     mode_lbl_sm: '单模最大截止宽度', mode_lbl_wbus: '推荐直波导宽 W_bus', mode_lbl_wring: '推荐微环宽 W_ring', mode_lbl_neff: '基模有效折射率',
     mode_card_field: '二维全矢量本征模场分布', mode_card_cutoff: '波导宽度色散与单模截止曲线',
     mrr_lbl_fsr: '自由光谱范围 FSR', mrr_lbl_loss: '传播损耗 α 与本征 Q', mrr_lbl_ql: '有载品质因数 Q_L', mrr_lbl_er: '谐振消光比 ER', mrr_lbl_cc: '临界耦合目标参数',
-    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_fab: '🧪 正/负胶曝光容差', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
+    mrr_btn_cc: '⚡ 一键应用临界耦合', mrr_btn_tune: '🎛️ 有源调谐与 INTERCONNECT', mrr_btn_fab: '🧪 正/负胶曝光容差', mrr_btn_sw_gap: '📏 扫描耦合间距', mrr_btn_sw_loss: '📉 扫描传播损耗 (dB/cm)',
     mrr_btn_gds: '💾 导出 .GDS 掩膜版图', mrr_btn_csv: '📥 下载光谱 .CSV',
     mrr_card_spec: '宽谱透射与下载光谱', mrr_card_coupler: '耦合器临界耦合综合曲线', mrr_card_schem: '微环拓扑与波导截面示意图',
     gds_btn_up: '📂 上传 .GDS / .OAS', gds_btn_single: '💾 生成单器件 .GDS', gds_btn_array: '🗂️ 生成 5 环容差阵列 .GDS',
@@ -1052,7 +1200,23 @@ const UI_I18N = {
     fab_kpi1: 'ER ≥ 15 dB 良率窗口', fab_kpi2: '过曝光 (+Max) 极值点', fab_kpi3: '欠曝光 (-Max) 极值点', fab_kpi4: '谐振波长线宽灵敏度',
     fab_plot1_title: '消光比与谐振漂移随曝光剂量 / 线宽变化曲线', fab_plot1_sub: '绿色阴影 = ER ≥ 15 dB 良率窗口',
     fab_plot2_title: '欠曝光 / 标称 / 过曝光三态谐振峰线型对比', fab_plot2_sub: '中心对齐相对失谐对比',
-    fab_tbl_title: '逐曝光梯度工艺线宽、耦合间距与光学指标明细表'
+    fab_tbl_title: '逐曝光梯度工艺线宽、耦合间距与光学指标明细表',
+    tune_card_title: '纯自研 2D-FEM 多物理场有源调谐 (TO / EO / 硅 PN-PIN) 与 Lumerical INTERCONNECT 导出 (零 COMSOL)',
+    tune_btn_run: '▶ 计算 2D-FEM 调谐与多态光谱', tune_btn_ic: '📦 导出 Lumerical INTERCONNECT (.ZIP)',
+    tune_lbl_mech: '物理调谐机制', tune_lbl_drive: '驱动量 / 物理场输入', tune_lbl_biases: '扫描电压 / 电流 / 温升 / 电场序列',
+    tune_opt_auto: '按材料自动匹配 (硅 PN 耗尽 / Pockels 电光 / 热光微加热器)',
+    tune_opt_pn: '硅横向 PN 结反向耗尽 (Soref-Bennett + 2D FEM)',
+    tune_opt_eo: '各向异性 Pockels 电光调制 (2D Laplace 静电场 / 直接电场)',
+    tune_opt_to: '热光微加热器调谐 (2D Fourier 热传导有限元 / 直接温升 ΔT)',
+    tune_opt_pin: '硅 PIN 结正向载流子注入 (等离子体色散 + FCA)',
+    tune_drv_auto: '默认物理激励', tune_drv_v: '电压 V [V] (关联截面几何)', tune_drv_i: '电流 I [mA] (关联截面几何)',
+    tune_drv_p: '加热功率 P [mW] (2D 热有限元)', tune_drv_t: '直接输入温度变化 ΔT [K]', tune_drv_e: '直接输入电场强度 E [V/µm]',
+    tune_lbl_hgap: '加热器间距 [µm]', tune_lbl_box: '埋氧层 BOX [µm]', tune_lbl_egap: '电光电极间距 G [µm]',
+    tune_lbl_doping: '硅 PN 掺杂浓度 [cm⁻³]', tune_lbl_pnoff: 'PN 结偏移 [nm]', tune_lbl_fact: '有源区占空比',
+    tune_kpi1: '器件调谐效率斜率', tune_kpi2: 'π 相移关键指标', tune_kpi3: '3-dB 电光/热光带宽', tune_kpi4: '2D-FEM 截面多物理耦合',
+    tune_plot1_title: '多偏置 / 多温度 / 多电场透射光谱簇',
+    tune_plot2_title: '谐振漂移 Δλ [pm] 与有源模态损耗 α [dB/cm]',
+    tune_tbl_title: '逐状态微扰 2D-FEM 本征模与谐振指标明细表'
   }
 };
 
@@ -1135,6 +1299,7 @@ function setStageView(viewName) {
     if (viewName === 'gds' && currentGdsView) drawGdsCanvas();
     if (viewName === 'fit' && labSpectrumData) runCmtFitUI();
     if (viewName === 'fab' && lastFabResult) renderFabResult(lastFabResult);
+    if (viewName === 'tuning' && lastTuningResult) renderTuningResult(lastTuningResult);
   }, 25);
 }
 
@@ -1477,6 +1642,13 @@ async function sendChatPrompt(promptText) {
       lastFabResult = data.fab_result;
       document.getElementById('fab-resist').value = data.fab_result.resist_tone || 'positive_pr';
       renderFabResult(data.fab_result);
+    }
+    if (data.tuning_result) {
+      lastTuningResult = data.tuning_result;
+      renderTuningResult(data.tuning_result);
+    }
+    if (data.interconnect_export && data.interconnect_export.zip_download_url) {
+      showInterconnectDownload(data.interconnect_export);
     }
   } catch (err) {
     thinking.remove();
@@ -2383,6 +2555,402 @@ function drawFabDipOverlay(fab) {
   ctx.fillText(currentLang === 'zh' ? '相对各谐振峰中心失谐 Δλ [pm]' : 'Detuning Around Each Corner Dip Δλ [pm]', pad.l + pw / 2, h - 4);
   ctx.textAlign = 'right';
   [0, -15, ymin].forEach(v => ctx.fillText(v.toFixed(0) + ' dB', pad.l - 5, ty(v) + 4));
+}
+
+// ==================== STAGE 7: 2D-FEM ACTIVE TUNING & LUMERICAL INTERCONNECT ====================
+const TUNE_PALETTE = ['#38bdf8', '#34d399', '#fbbf24', '#fb923c', '#f472b6', '#a78bfa', '#22d3ee'];
+
+function onTuneControlChange(which) {
+  const mech = document.getElementById('tune-mech').value;
+  const drvEl = document.getElementById('tune-drive');
+  let drv = drvEl.value;
+  const biasInp = document.getElementById('tune-biases');
+
+  if (which === 'mech') {
+    const curMat = document.getElementById('cfg-material').value;
+    if ((mech === 'si_pn_depletion' || mech === 'si_pin_injection') && curMat !== 'Si') {
+      document.getElementById('cfg-material').value = 'Si';
+      document.getElementById('cfg-wl').value = 1550;
+      document.getElementById('cfg-hfilm').value = 0.22;
+      document.getElementById('cfg-hslab').value = 0.09;
+      document.getElementById('cfg-wring').value = 0.48;
+      document.getElementById('cfg-wbus').value = 0.44;
+      document.getElementById('cfg-r1').value = 20;
+      document.getElementById('cfg-gap').value = 0.18;
+      syncFormFromConfig(readConfigFromForm());
+    } else if (mech === 'pockels_eo' && ['Si3N4', 'Si', 'a-Si', 'Ge', 'SiON', 'TiO2', 'Ta2O5', 'Diamond', 'ChG_As2S3', 'ChG_GeSbSe', 'Polymer_SU8'].includes(curMat)) {
+      document.getElementById('cfg-material').value = 'LN_Xcut';
+      document.getElementById('cfg-wl').value = 1550;
+      document.getElementById('cfg-hfilm').value = 0.60;
+      document.getElementById('cfg-hslab').value = 0.30;
+      document.getElementById('cfg-wring').value = 1.20;
+      document.getElementById('cfg-wbus').value = 1.00;
+      document.getElementById('cfg-r1').value = 60;
+      document.getElementById('cfg-gap').value = 0.30;
+      syncFormFromConfig(readConfigFromForm());
+    }
+    if (mech === 'si_pn_depletion') { drvEl.value = 'voltage_v'; biasInp.value = '0, -1, -2, -4, -6'; }
+    else if (mech === 'si_pin_injection') { drvEl.value = 'current_ma'; biasInp.value = '0, 0.25, 0.5, 1.0, 2.0'; }
+    else if (mech === 'pockels_eo') { drvEl.value = 'voltage_v'; biasInp.value = '-15, -7.5, 0, 7.5, 15'; }
+    else if (mech === 'thermo_optic') { drvEl.value = 'current_ma'; biasInp.value = '0, 2, 4, 6, 8'; }
+    else { drvEl.value = 'auto'; biasInp.value = ''; }
+  } else if (which === 'drive') {
+    if (drv === 'delta_temp_k') {
+      document.getElementById('tune-mech').value = 'thermo_optic';
+      biasInp.value = '0, 10, 25, 50, 75';
+    } else if (drv === 'e_field_v_per_um') {
+      document.getElementById('tune-mech').value = 'pockels_eo';
+      const curMat = document.getElementById('cfg-material').value;
+      if (['Si3N4', 'Si', 'a-Si', 'Ge', 'SiON', 'TiO2', 'Ta2O5', 'Diamond', 'ChG_As2S3', 'ChG_GeSbSe', 'Polymer_SU8'].includes(curMat)) {
+        document.getElementById('cfg-material').value = 'LN_Xcut';
+        document.getElementById('cfg-hfilm').value = 0.60;
+        document.getElementById('cfg-hslab').value = 0.30;
+        document.getElementById('cfg-wring').value = 1.20;
+        document.getElementById('cfg-wbus').value = 1.00;
+        document.getElementById('cfg-r1').value = 60;
+        document.getElementById('cfg-gap').value = 0.30;
+        syncFormFromConfig(readConfigFromForm());
+      }
+      biasInp.value = '-10, -5, 0, 5, 10';
+    } else if (drv === 'power_mw') {
+      biasInp.value = '0, 5, 10, 20, 30';
+    } else if (drv === 'current_ma') {
+      biasInp.value = (mech === 'si_pin_injection') ? '0, 0.25, 0.5, 1.0, 2.0' : '0, 2, 4, 6, 8';
+    } else if (drv === 'voltage_v') {
+      biasInp.value = (mech === 'si_pn_depletion') ? '0, -1, -2, -4, -6' : (mech === 'pockels_eo' ? '-15, -7.5, 0, 7.5, 15' : '0, 1, 2, 3, 4');
+    }
+  }
+  runActiveTuningUI();
+}
+
+function buildTuningPayload() {
+  const cfg = readConfigFromForm();
+  const egapRaw = document.getElementById('tune-egap').value;
+  const dopVal = parseFloat(document.getElementById('tune-doping').value) || 5.0e17;
+  return {
+    config: cfg,
+    mechanism: document.getElementById('tune-mech').value || 'auto',
+    drive_type: document.getElementById('tune-drive').value || 'auto',
+    bias_values: document.getElementById('tune-biases').value || null,
+    heater_gap_um: parseFloat(document.getElementById('tune-hgap').value) || 0.90,
+    box_thickness_um: parseFloat(document.getElementById('tune-box').value) || 2.00,
+    electrode_gap_um: egapRaw === '' ? null : parseFloat(egapRaw),
+    na_p_cm3: dopVal,
+    nd_n_cm3: dopVal,
+    pn_offset_nm: parseFloat(document.getElementById('tune-pnoff').value) || 25.0,
+    active_fraction: parseFloat(document.getElementById('tune-fact').value) || 0.78
+  };
+}
+
+async function runActiveTuningUI() {
+  const payload = buildTuningPayload();
+  document.getElementById('spec-status').textContent = currentLang === 'zh'
+    ? '正在求解 2D-FEM 多物理场与扰动本征模...'
+    : 'Solving 2D-FEM multiphysics + perturbed eigenmodes...';
+  try {
+    const r = await fetch('/api/active_tuning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (data.error) {
+      document.getElementById('tune-geom-banner').innerHTML = `<span style="color:#f87171;">⚠️ ${data.error}</span>`;
+      document.getElementById('spec-status').textContent = 'Solver notice';
+      return;
+    }
+    lastTuningResult = data;
+    renderTuningResult(data);
+    document.getElementById('spec-status').textContent = currentLang === 'zh'
+      ? `2D-FEM 调谐完成 (${data.elapsed_ms} ms)`
+      : `2D-FEM Tuning in ${data.elapsed_ms} ms`;
+  } catch (err) {
+    document.getElementById('spec-status').textContent = 'Error: ' + err;
+  }
+}
+
+function showInterconnectDownload(ic) {
+  const slot = document.getElementById('ic-download-slot');
+  if (!slot || !ic || !ic.zip_download_url) return;
+  slot.innerHTML = `<a class="btn amber sm" href="${ic.zip_download_url}" download>⬇ ${ic.zip_name || 'INTERCONNECT.zip'}</a>`;
+}
+
+async function exportInterconnectUI() {
+  const payload = buildTuningPayload();
+  if (lastTuningResult) payload.tuning_result = lastTuningResult;
+  document.getElementById('spec-status').textContent = currentLang === 'zh'
+    ? '正在生成 Lumerical INTERCONNECT 模型包...'
+    : 'Exporting Lumerical INTERCONNECT bundle...';
+  try {
+    const r = await fetch('/api/export_interconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const ic = await r.json();
+    if (ic.error) { alert('INTERCONNECT Export Error: ' + ic.error); return; }
+    showInterconnectDownload(ic);
+    document.getElementById('spec-status').textContent = currentLang === 'zh'
+      ? `已导出 ${ic.zip_name}`
+      : `Exported ${ic.zip_name}`;
+    if (ic.zip_download_url) {
+      const a = document.createElement('a');
+      a.href = ic.zip_download_url;
+      a.download = ic.zip_name || 'OpenMRR_INTERCONNECT.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  } catch (err) {
+    alert('Export failed: ' + err);
+  }
+}
+
+function renderTuningResult(res) {
+  if (!res || !res.efficiency) return;
+  const eff = res.efficiency;
+  const gp = res.geometry_physics || {};
+  const pm = res.passive_metrics || {};
+  const zh = currentLang === 'zh';
+
+  document.getElementById('tune-kpi-slope').textContent = `${eff.wavelength_slope} ${eff.wavelength_slope_unit}`;
+  document.getElementById('tune-kpi-fslope').textContent = `${eff.freq_slope} ${eff.freq_slope_unit}`;
+  document.getElementById('tune-kpi-pi').textContent = `${eff.pi_figure} ${eff.pi_figure_unit}`;
+  document.getElementById('tune-kpi-pi-sub').textContent = `${eff.pi_figure_label} · L_act = ${gp.active_length_um || '--'} µm`;
+  document.getElementById('tune-kpi-bw').textContent = eff.bandwidth_3db !== null && eff.bandwidth_3db !== undefined
+    ? `${eff.bandwidth_3db} ${eff.bandwidth_unit}`
+    : (zh ? '准静态输入' : 'Direct Field');
+
+  if (eff.mechanism === 'thermo_optic') {
+    document.getElementById('tune-kpi-bw-sub').textContent = gp.tau_thermal_us
+      ? `τ_th = ${gp.tau_thermal_us} µs · BOX ${gp.box_thickness_um} µm`
+      : `dn/dT = ${(gp.dn_dt_core_per_k || 0).toExponential(2)} /K`;
+    document.getElementById('tune-kpi-geom').textContent = gp.r_th_core_k_per_mw
+      ? `${gp.r_th_core_k_per_mw} K/mW`
+      : `dn/dT`;
+    document.getElementById('tune-kpi-geom-sub').textContent = gp.heater_resistance_ohm
+      ? `R_h = ${gp.heater_resistance_ohm} Ω · gap ${gp.heater_gap_um} µm`
+      : (zh ? '直接温升 ΔT 截面扰动' : 'Direct ΔT Cross-Section');
+    document.getElementById('tune-geom-banner').innerHTML = zh
+      ? `<strong>${gp.mechanism_name_zh}（纯自研 2D Fourier 热传导 FEM + 矢量 Maxwell FEM）</strong>：` +
+        (gp.r_th_core_k_per_mw
+          ? `波导芯层热阻 <code>R_th = ${gp.r_th_core_k_per_mw} K/mW</code>，<code>${gp.heater_material}</code> 加热器电阻 <code>R_elec = ${gp.heater_resistance_ohm} Ω</code>，埋氧层 <code>BOX = ${gp.box_thickness_um} µm</code>，热响应时间 <code>τ = ${gp.tau_thermal_us} µs</code>。`
+          : `直接输入温升 <code>ΔT [K]</code>，结合芯层/包层热光系数 <code>dn/dT = ${(gp.dn_dt_core_per_k||0).toExponential(2)} /K</code> 求解二维微扰本征模。`)
+      : `<strong>${gp.mechanism_name_en} (Native 2D Fourier Thermal FEM + Vector Maxwell FEM)</strong>: ` +
+        (gp.r_th_core_k_per_mw
+          ? `Core thermal resistance <code>R_th = ${gp.r_th_core_k_per_mw} K/mW</code>, <code>${gp.heater_material}</code> heater <code>R_elec = ${gp.heater_resistance_ohm} Ω</code>, <code>BOX = ${gp.box_thickness_um} µm</code>, thermal constant <code>τ = ${gp.tau_thermal_us} µs</code>.`
+          : `Direct temperature shift <code>ΔT [K]</code> mapped via core/cladding <code>dn/dT = ${(gp.dn_dt_core_per_k||0).toExponential(2)} /K</code> into 2D vector eigenmodes.`);
+  } else if (eff.mechanism === 'pockels_eo') {
+    document.getElementById('tune-kpi-bw-sub').textContent = gp.c_total_ff
+      ? `C_tot = ${gp.c_total_ff} fF (50 Ω RC)`
+      : `r_33 = ${gp.r33_pm_per_v} pm/V`;
+    document.getElementById('tune-kpi-geom').textContent = gp.ex_core_v_per_um_per_v !== undefined
+      ? `${Math.max(Math.abs(gp.ex_core_v_per_um_per_v||0), Math.abs(gp.ey_core_v_per_um_per_v||0)).toFixed(3)} (V/µm)/V`
+      : `r_33 = ${gp.r33_pm_per_v} pm/V`;
+    document.getElementById('tune-kpi-geom-sub').textContent = gp.electrode_gap_um
+      ? `G = ${gp.electrode_gap_um} µm · C = ${gp.c_elec_ff_per_um} fF/µm`
+      : `Axis: ${gp.e_field_axis || 'auto'}`;
+    document.getElementById('tune-geom-banner').innerHTML = zh
+      ? `<strong>${gp.mechanism_name_zh}（纯自研 2D 各向异性 Laplace 静电场 FEM + 矢量 Maxwell FEM）</strong>：` +
+        `电光张量 <code>r_33 = ${gp.r33_pm_per_v} pm/V, r_13 = ${gp.r13_pm_per_v} pm/V</code>` +
+        (gp.electrode_gap_um ? `，电极间距 <code>G = ${gp.electrode_gap_um} µm</code>，介电屏蔽因子 <code>${gp.dielectric_screening_factor}</code>，线电容 <code>${gp.c_elec_ff_per_um} fF/µm</code>。` : `，直接输入芯层电场 <code>E [V/µm]</code>。`)
+      : `<strong>${gp.mechanism_name_en} (Native 2D Anisotropic Laplace FEM + Vector Maxwell FEM)</strong>: ` +
+        `Pockels tensor <code>r_33 = ${gp.r33_pm_per_v} pm/V, r_13 = ${gp.r13_pm_per_v} pm/V</code>` +
+        (gp.electrode_gap_um ? `, electrode gap <code>G = ${gp.electrode_gap_um} µm</code>, dielectric screening <code>${gp.dielectric_screening_factor}</code>, line capacitance <code>${gp.c_elec_ff_per_um} fF/µm</code>.` : `, direct electric field <code>E [V/µm]</code>.`);
+  } else {
+    document.getElementById('tune-kpi-bw-sub').textContent = gp.r_series_ohm
+      ? `R_s = ${gp.r_series_ohm} Ω · Slab ${Math.round((gp.slab_height_used_um||0.09)*1000)} nm`
+      : `τ_c = ${gp.carrier_lifetime_ns || 1.0} ns`;
+    document.getElementById('tune-kpi-geom').textContent = gp.w_dep_0v_nm
+      ? `W_dep = ${gp.w_dep_0v_nm} nm`
+      : `FCA Δα`;
+    document.getElementById('tune-kpi-geom-sub').textContent = gp.cj_0v_ff_per_um
+      ? `C_j(0V) = ${gp.cj_0v_ff_per_um} fF/µm · ΔFCA ${eff.fca_relief_db_per_cm || 0} dB/cm`
+      : `Max FCA = ${eff.fca_max_db_per_cm || 0} dB/cm`;
+    document.getElementById('tune-geom-banner').innerHTML = zh
+      ? `<strong>${gp.mechanism_name_zh}（纯自研 2D 硅结耗尽/注入模型 + Soref-Bennett + 矢量 Maxwell FEM）</strong>：` +
+        (gp.w_dep_0v_nm
+          ? `零偏耗尽区宽度 <code>W_dep(0V) = ${gp.w_dep_0v_nm} nm</code>（内建电势 <code>V_bi = ${gp.v_bi_v} V</code>，结偏移 <code>+${gp.pn_offset_nm} nm</code>），结电容 <code>C_j(0V) = ${gp.cj_0v_ff_per_um} fF/µm</code>，平板串联电阻 <code>R_s = ${gp.r_series_ohm} Ω</code>。`
+          : `本征区宽度 <code>W_i = ${gp.intrinsic_width_um} µm</code>，载流子寿命 <code>τ_c = ${gp.carrier_lifetime_ns} ns</code>，同步求解蓝移与自由载流子吸收 (FCA)。`)
+      : `<strong>${gp.mechanism_name_en} (Native 2D Si Junction + Soref-Bennett + Vector Maxwell FEM)</strong>: ` +
+        (gp.w_dep_0v_nm
+          ? `Zero-bias depletion <code>W_dep(0V) = ${gp.w_dep_0v_nm} nm</code> (<code>V_bi = ${gp.v_bi_v} V</code>, offset <code>+${gp.pn_offset_nm} nm</code>), capacitance <code>C_j(0V) = ${gp.cj_0v_ff_per_um} fF/µm</code>, slab resistance <code>R_s = ${gp.r_series_ohm} Ω</code>.`
+          : `Intrinsic width <code>W_i = ${gp.intrinsic_width_um} µm</code>, carrier lifetime <code>τ_c = ${gp.carrier_lifetime_ns} ns</code>, solving simultaneous plasma blue-shift &amp; modal FCA.`);
+  }
+
+  document.getElementById('tune-plot1-sub').textContent = `FSR = ${(pm.FSR_GHz||0).toFixed(1)} GHz (${(pm.FSR_nm||0).toFixed(3)} nm)`;
+
+  const tbody = document.querySelector('#tune-table tbody');
+  tbody.innerHTML = '';
+  (res.states || []).forEach((st, idx) => {
+    const tr = document.createElement('tr');
+    const col = TUNE_PALETTE[idx % TUNE_PALETTE.length];
+    let auxTxt = '--';
+    if (st.delta_T_core_K !== undefined) auxTxt = `ΔT_core = +${st.delta_T_core_K.toFixed(2)} K (${st.power_mw !== undefined ? st.power_mw.toFixed(1)+' mW' : 'Direct'})`;
+    else if (st.w_dep_nm !== undefined) auxTxt = `W_dep = ${st.w_dep_nm.toFixed(1)} nm · C_j = ${st.cj_ff_per_um.toFixed(3)} fF/µm`;
+    else if (st.delta_N_cm3 !== undefined) auxTxt = `ΔN = ${st.delta_N_cm3.toExponential(2)} cm⁻³`;
+    else if (st.Ex_core_v_per_um !== undefined) auxTxt = `E = (${st.Ex_core_v_per_um.toFixed(2)}, ${st.Ey_core_v_per_um.toFixed(2)}) V/µm`;
+
+    tr.innerHTML = `
+      <td><span style="color:${col};font-weight:700;">● ${st.label}</span></td>
+      <td>${auxTxt}</td>
+      <td>${st.neff_active_real.toFixed(6)}</td>
+      <td>${(st.delta_neff_active * 1e4 >= 0 ? '+' : '') + (st.delta_neff_active * 1e4).toFixed(3)}</td>
+      <td>${st.alpha_total_roundtrip_db_per_cm.toFixed(2)}</td>
+      <td style="font-weight:700;color:#38bdf8;">${(st.resonance_shift_pm >= 0 ? '+' : '') + st.resonance_shift_pm.toFixed(2)}</td>
+      <td>${st.ER_thru_dB.toFixed(1)}</td>
+      <td>${Math.round(st.Q_loaded).toLocaleString()}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  drawTuningSpectra(res);
+  drawTuningShiftLoss(res);
+}
+
+function drawTuningSpectra(res) {
+  const sp = res.spectra || {};
+  const wl = sp.wavelength_nm || [];
+  const curves = sp.curves || [];
+  if (!wl.length || !curves.length) return;
+
+  // Focus wavelength window around the tracked resonance + shift span so multi-bias shifts are crystal clear!
+  const lam0 = (res.passive_metrics && res.passive_metrics.tracked_resonance_0_nm) || wl[Math.floor(wl.length / 2)];
+  const shiftsNm = (res.states || []).map(s => (s.resonance_shift_pm || 0) * 1e-3);
+  const sMin = Math.min(0, ...shiftsNm), sMax = Math.max(0, ...shiftsNm);
+  const fwhmEstNm = Math.max(0.03, lam0 / Math.max((res.passive_metrics && res.passive_metrics.Q_loaded_0) || 15000, 1500));
+  const halfPad = Math.max(4.5 * fwhmEstNm, 0.35 * Math.abs(sMax - sMin) + 2.5 * fwhmEstNm);
+  const wLo = Math.max(wl[0], lam0 + sMin - halfPad);
+  const wHi = Math.min(wl[wl.length - 1], lam0 + sMax + halfPad);
+
+  const { ctx, w, h } = setupCanvas('cv-tune-spec');
+  ctx.fillStyle = '#070b14';
+  ctx.fillRect(0, 0, w, h);
+  const pad = { l: 50, r: 16, t: 22, b: 36 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+  let ymin = -25, ymax = 1.2;
+  curves.forEach(c => {
+    for (let i = 0; i < wl.length; i++) {
+      if (wl[i] >= wLo && wl[i] <= wHi && c.thru_dB[i] < ymin) ymin = Math.max(-45, Math.floor(c.thru_dB[i] / 5) * 5 - 2);
+    }
+  });
+
+  const sx = x => pad.l + ((x - wLo) / Math.max(wHi - wLo, 1e-6)) * pw;
+  const sy = y => pad.t + ph - ((Math.max(ymin, Math.min(ymax, y)) - ymin) / (ymax - ymin)) * ph;
+
+  ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(pad.l, pad.t, pw, ph);
+
+  ctx.fillStyle = '#94a3b8'; ctx.font = '10.5px Arial, sans-serif';
+  for (let i = 0; i <= 4; i++) {
+    const tx = pad.l + (i / 4) * pw;
+    const vx = wLo + (i / 4) * (wHi - wLo);
+    ctx.beginPath(); ctx.moveTo(tx, pad.t + ph); ctx.lineTo(tx, pad.t + ph - 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx, pad.t); ctx.lineTo(tx, pad.t + 5); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.fillText(vx.toFixed(wHi - wLo < 0.6 ? 3 : 2), tx, h - 19);
+
+    const ty = pad.t + ph - (i / 4) * ph;
+    const vy = ymin + (i / 4) * (ymax - ymin);
+    ctx.beginPath(); ctx.moveTo(pad.l, ty); ctx.lineTo(pad.l + 5, ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad.l + pw, ty); ctx.lineTo(pad.l + pw - 5, ty); ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillText(vy.toFixed(0), pad.l - 6, ty + 3.5);
+  }
+
+  curves.forEach((c, idx) => {
+    const col = TUNE_PALETTE[idx % TUNE_PALETTE.length];
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.9;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < wl.length; i++) {
+      if (wl[i] < wLo || wl[i] > wHi) continue;
+      const px = sx(wl[i]), py = sy(c.thru_dB[i]);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = col;
+    ctx.font = 'bold 10.5px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    const colIdx = idx % 3, rowIdx = Math.floor(idx / 3);
+    ctx.fillText(`● ${c.label}`, pad.l + 8 + colIdx * Math.floor(pw / 3), pad.t + 14 + rowIdx * 13);
+  });
+
+  ctx.fillStyle = '#cbd5e1'; ctx.font = '11px Arial, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(currentLang === 'zh' ? '波长 Wavelength [nm]' : 'Wavelength [nm]', pad.l + pw / 2, h - 4);
+  ctx.save(); ctx.translate(14, pad.t + ph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Through [dB]', 0, 0); ctx.restore();
+}
+
+function drawTuningShiftLoss(res) {
+  const states = (res.states || []).slice().sort((a, b) => a.bias_value - b.bias_value);
+  if (states.length < 2) return;
+  const { ctx, w, h } = setupCanvas('cv-tune-shift');
+  ctx.fillStyle = '#070b14';
+  ctx.fillRect(0, 0, w, h);
+  const pad = { l: 52, r: 52, t: 22, b: 36 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+  const xs = states.map(s => s.bias_value);
+  const shifts = states.map(s => s.resonance_shift_pm);
+  const losses = states.map(s => s.alpha_total_roundtrip_db_per_cm);
+
+  let xmin = Math.min(...xs), xmax = Math.max(...xs);
+  if (Math.abs(xmax - xmin) < 1e-9) { xmin -= 1; xmax += 1; }
+  let smin = Math.min(0, ...shifts), smax = Math.max(0, ...shifts);
+  if (Math.abs(smax - smin) < 1e-6) { smin -= 10; smax += 10; }
+  const spPad = 0.12 * (smax - smin); smin -= spPad; smax += spPad;
+
+  let lmin = Math.min(...losses), lmax = Math.max(...losses);
+  if (Math.abs(lmax - lmin) < 0.05) { lmin = Math.max(0, lmin - 0.5); lmax += 0.5; }
+  else { const lp = 0.15 * (lmax - lmin); lmin = Math.max(0, lmin - lp); lmax += lp; }
+
+  const tx = v => pad.l + ((v - xmin) / (xmax - xmin)) * pw;
+  const tyS = v => pad.t + ph - ((v - smin) / (smax - smin)) * ph;
+  const tyL = v => pad.t + ph - ((v - lmin) / (lmax - lmin)) * ph;
+
+  ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.1;
+  ctx.strokeRect(pad.l, pad.t, pw, ph);
+
+  // Zero-shift reference line
+  if (0 >= smin && 0 <= smax) {
+    ctx.strokeStyle = 'rgba(148,163,184,0.25)';
+    ctx.beginPath(); ctx.moveTo(pad.l, tyS(0)); ctx.lineTo(pad.l + pw, tyS(0)); ctx.stroke();
+  }
+
+  // Dashed amber: Total roundtrip modal loss [dB/cm]
+  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.9; ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  states.forEach((s, i) => { const x = tx(s.bias_value), y = tyL(s.alpha_total_roundtrip_db_per_cm); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.stroke(); ctx.setLineDash([]);
+  states.forEach(s => {
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath(); ctx.arc(tx(s.bias_value), tyL(s.alpha_total_roundtrip_db_per_cm), 3.2, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Solid cyan: Resonance shift Δλ [pm]
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  states.forEach((s, i) => { const x = tx(s.bias_value), y = tyS(s.resonance_shift_pm); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.stroke();
+  states.forEach(s => {
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath(); ctx.arc(tx(s.bias_value), tyS(s.resonance_shift_pm), 4.0, 0, Math.PI * 2); ctx.fill();
+  });
+
+  ctx.font = '10.5px Arial, sans-serif';
+  ctx.fillStyle = '#94a3b8'; ctx.textAlign = 'center';
+  [xmin, 0.5 * (xmin + xmax), xmax].forEach(v => ctx.fillText(v.toFixed(Math.abs(xmax - xmin) < 4 ? 2 : 1), tx(v), h - 18));
+  const uStr = states[0].bias_unit || '';
+  ctx.fillText(`${(res.geometry_physics && res.geometry_physics.drive_type) || 'Drive'} [${uStr}]`, pad.l + pw / 2, h - 4);
+
+  ctx.textAlign = 'right'; ctx.fillStyle = '#38bdf8';
+  [smin, 0.5 * (smin + smax), smax].forEach(v => ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(0) + ' pm', pad.l - 5, tyS(v) + 3.5));
+
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f59e0b';
+  [lmin, 0.5 * (lmin + lmax), lmax].forEach(v => ctx.fillText(v.toFixed(1) + ' dB/cm', pad.l + pw + 5, tyL(v) + 3.5));
 }
 
 // ==================== BOOTSTRAP ====================

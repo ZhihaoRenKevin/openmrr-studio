@@ -3,10 +3,10 @@
 ; and optional Desktop shortcuts, and provides standard Windows Add/Remove Programs uninstall.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "3.3.0"
+  #define MyAppVersion "3.4.0"
 #endif
 #ifndef OutputBaseFilename
-  #define OutputBaseFilename "OpenMRR-Studio-v3.3.0-Windows-Setup-x64"
+  #define OutputBaseFilename "OpenMRR-Studio-v3.4.0-Windows-Setup-x64"
 #endif
 
 [Setup]

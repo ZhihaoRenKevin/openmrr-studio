@@ -18,6 +18,7 @@ When helping users design, sweep, fit, or lay out photonic microring resonators 
 | **Extract geometry from `.gds` / `.oas`** | `uv run openmrr agent inspect-gds path/to/layout.gds` |
 | **Fit lab spectrum CSV (`Q_int`, doublet)** | `uv run openmrr agent fit path/to/trace.csv --model auto --regime under` |
 | **Positive/Negative PR dose & CD error** | `uv run openmrr agent fab-tolerance --mat Si3N4 --top pulley_ap --resist positive_pr --dose-pct 15 --bias-gds` |
+| **2D-FEM TO/EO/Si-PN tuning & INTERCONNECT** | `uv run openmrr agent active-tuning --mat Si --h 0.22 --slab 0.09 --w-ring 0.48 --w-bus 0.44 --r 20 --mech si_pn_depletion --biases "0,-2,-5" --interconnect` |
 
 ## Valid Keys Quick Reference
 - **7 Topologies (`--top`)**: `point_circular_ap`, `point_circular_ad`, `racetrack_ap`, `racetrack_ad`, `pulley_ap`, `pulley_ad`, `vernier_crow_ad`

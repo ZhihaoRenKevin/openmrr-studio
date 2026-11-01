@@ -23,8 +23,10 @@ from openmrr import (
     MATERIAL_CATALOG,
     MRRDesignConfig,
     RESIST_TONE_CATALOG,
+    TUNING_MECHANISM_CATALOG,
     T_REF_K,
     WaveguideCrossSectionSpec,
+    agent_active_tuning,
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
@@ -35,6 +37,7 @@ from openmrr import (
     create_initial_session,
     detect_hardware_profile,
     export_fab_bias_array_gds,
+    export_lumerical_interconnect_bundle,
     export_mrr_gds,
     export_sweep_array_gds,
     fit_single_resonance_cmt,
@@ -42,6 +45,7 @@ from openmrr import (
     loss_db_per_cm_to_q_int,
     process_chat_turn,
     q_int_to_loss_db_per_cm,
+    run_active_tuning_analysis,
     run_compute_benchmark,
     run_fabrication_error_analysis,
     run_mrr_parameter_sweep,
@@ -339,7 +343,7 @@ def test_agent_tools_and_mcp_minimal_tokens() -> None:
     init_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     assert init_resp is not None and init_resp["result"]["serverInfo"]["name"] == "openmrr-studio"
     list_resp = handle_mcp_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    assert list_resp is not None and len(list_resp["result"]["tools"]) == 7
+    assert list_resp is not None and len(list_resp["result"]["tools"]) == 8
 
     # 2. Compact MCP design + critical coupling + GDS export (< 550 chars => < ~140 tokens!)
     call_resp = handle_mcp_request({
@@ -556,6 +560,173 @@ def test_fabrication_dose_and_pr_tolerance() -> None:
     assert Path(mcp_json["csv"]).is_file() and Path(mcp_json["bias_gds"]).is_file()
 
 
+def test_active_tuning_2d_fem_and_interconnect() -> None:
+    assert {"thermo_optic", "pockels_eo", "si_pn_depletion", "si_pin_injection"}.issubset(
+        TUNING_MECHANISM_CATALOG.keys()
+    )
+
+    # 1. Silicon Lateral PN Depletion (reverse bias widens W_dep -> red-shifts resonance & lowers modal FCA)
+    soi_cfg = MRRDesignConfig(
+        topology="point_circular_ap",
+        core_material="Si",
+        film_height_um=0.22,
+        slab_height_um=0.09,
+        ring_width_um=0.48,
+        bus_width_um=0.44,
+        ring_radius_um=20.0,
+        gap_thru_um=0.16,
+        wavelength_nm=1550.0,
+        span_nm=6.0,
+    )
+    pn = run_active_tuning_analysis(
+        soi_cfg, mechanism="si_pn_depletion", drive_type="voltage_v", bias_values=[0.0, -2.0, -5.0]
+    )
+    assert pn["states"][-1]["resonance_shift_pm"] > 30.0
+    assert pn["states"][-1]["alpha_active_only_db_per_cm"] < pn["states"][0]["alpha_active_only_db_per_cm"]
+    assert 0.5 < pn["efficiency"]["V_pi_L_v_cm"] < 6.0
+    assert pn["geometry_physics"]["f_3db_eo_ghz"] > 5.0
+
+    # 2. Silicon PIN Forward Injection (carrier plasma blue-shift + rising modal FCA)
+    pin = run_active_tuning_analysis(
+        soi_cfg, mechanism="si_pin_injection", drive_type="current_ma", bias_values=[0.0, 0.5, 1.5]
+    )
+    assert pin["states"][-1]["resonance_shift_pm"] < -40.0
+    assert pin["states"][-1]["alpha_active_only_db_per_cm"] > pin["states"][0]["alpha_active_only_db_per_cm"] + 1.0
+
+    # 3. Anisotropic Pockels EO (2D Laplace electrode gap sensitivity + direct E-field input)
+    tfln_cfg = MRRDesignConfig(
+        topology="racetrack_ap",
+        core_material="LN_Xcut",
+        film_height_um=0.60,
+        slab_height_um=0.30,
+        ring_width_um=1.20,
+        bus_width_um=1.00,
+        ring_radius_um=60.0,
+        straight_length_um=60.0,
+        gap_thru_um=0.30,
+        wavelength_nm=1550.0,
+    )
+    eo_narrow = run_active_tuning_analysis(
+        tfln_cfg, mechanism="pockels_eo", drive_type="voltage_v", bias_values=[-10.0, 0.0, 10.0], electrode_gap_um=3.2
+    )
+    eo_wide = run_active_tuning_analysis(
+        tfln_cfg, mechanism="pockels_eo", drive_type="voltage_v", bias_values=[-10.0, 0.0, 10.0], electrode_gap_um=5.6
+    )
+    assert eo_narrow["efficiency"]["V_pi_L_v_cm"] < eo_wide["efficiency"]["V_pi_L_v_cm"]
+    eo_efield = run_active_tuning_analysis(
+        tfln_cfg, mechanism="pockels_eo", drive_type="e_field_v_per_um", bias_values=[-8.0, 0.0, 8.0]
+    )
+    assert abs(eo_efield["efficiency"]["wavelength_slope"]) > 30.0
+
+    # 4. Thermo-Optic Microheater (2D Fourier FEM BOX thickness sensitivity + direct temperature input)
+    sin_cfg = MRRDesignConfig(
+        topology="point_circular_ap",
+        core_material="Si3N4",
+        film_height_um=0.40,
+        ring_width_um=1.20,
+        bus_width_um=1.00,
+        ring_radius_um=40.0,
+        gap_thru_um=0.25,
+        wavelength_nm=1550.0,
+    )
+    to_thin = run_active_tuning_analysis(
+        sin_cfg, mechanism="thermo_optic", drive_type="current_ma", bias_values=[0.0, 4.0, 8.0], box_thickness_um=1.8
+    )
+    to_thick = run_active_tuning_analysis(
+        sin_cfg, mechanism="thermo_optic", drive_type="current_ma", bias_values=[0.0, 4.0, 8.0], box_thickness_um=3.6
+    )
+    assert to_thick["geometry_physics"]["r_th_core_k_per_mw"] > to_thin["geometry_physics"]["r_th_core_k_per_mw"]
+    assert to_thick["efficiency"]["P_pi_mw"] < to_thin["efficiency"]["P_pi_mw"]
+
+    to_dt = run_active_tuning_analysis(
+        sin_cfg, mechanism="thermo_optic", drive_type="delta_temp_k", bias_values=[0.0, 20.0, 50.0]
+    )
+    assert to_dt["efficiency"]["wavelength_slope"] > 8.0
+
+    # 5. Lumerical INTERCONNECT export + Copilot + ASGI HTTP + MCP (<150 tokens)
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        ic = export_lumerical_interconnect_bundle(soi_cfg, pn, tmp_path / "ic_soi_pn", make_zip=True)
+        assert ic["passivity_verified"] is True
+        assert Path(ic["spar_dat"]).is_file() and Path(ic["active_neff_table"]).is_file()
+        assert Path(ic["lsf_script"]).is_file() and Path(ic["zip_path"]).is_file()
+
+        # Verify strictly ascending frequency in SPAR .dat and non-negative Im(neff) in OMM .txt
+        spar_lines = [
+            ln.split() for ln in Path(ic["spar_dat"]).read_text(encoding="utf-8").splitlines()
+            if ln and not ln.startswith("(")
+        ]
+        freqs = [float(r[0]) for r in spar_lines[:20]]
+        assert all(freqs[i] < freqs[i + 1] for i in range(len(freqs) - 1))
+
+        omm_lines = [
+            [float(x) for x in ln.split()]
+            for ln in Path(ic["active_neff_table"]).read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert all(omm_lines[i][0] < omm_lines[i + 1][0] for i in range(len(omm_lines) - 1))
+        assert all(row[2] >= 0.0 for row in omm_lines)
+
+        c_tune = process_chat_turn(
+            create_initial_session(lang="en"),
+            "Si PN junction tuning spectra at 0, -2, -5 V and export Lumerical INTERCONNECT",
+            gds_export_dir=tmp_path,
+        )
+        assert c_tune["ui_view"] == "tuning"
+        assert "tuning_result" in c_tune and "interconnect_export" in c_tune
+
+        async def _check_tune_http() -> None:
+            old_exp = srv.GDS_EXPORT_DIR
+            srv.GDS_EXPORT_DIR = tmp_path / "srv_ic"
+            try:
+                st1, b1 = await _asgi_request(
+                    "POST",
+                    "/api/active_tuning",
+                    json_body={"config": asdict(sin_cfg), "drive_type": "delta_temp_k", "bias_values": [0, 25, 50]},
+                )
+                assert st1 == 200 and json.loads(b1)["efficiency"]["mechanism"] == "thermo_optic"
+                st2, b2 = await _asgi_request(
+                    "POST",
+                    "/api/export_interconnect",
+                    json_body={"config": asdict(soi_cfg), "mechanism": "si_pn_depletion", "bias_values": [0, -2, -4]},
+                )
+                d2 = json.loads(b2)
+                assert st2 == 200 and "zip_download_url" in d2
+                q_dl = d2["zip_download_url"].split("?", 1)[1]
+                st3, zbytes = await _asgi_request("GET", "/api/download_file", query_string=q_dl)
+                assert st3 == 200 and len(zbytes) > 500
+            finally:
+                srv.GDS_EXPORT_DIR = old_exp
+
+        asyncio.run(_check_tune_http())
+
+    mcp_tune = handle_mcp_request({
+        "jsonrpc": "2.0",
+        "id": 108,
+        "method": "tools/call",
+        "params": {
+            "name": "openmrr_active_tuning",
+            "arguments": {
+                "mat": "Si",
+                "h_um": 0.22,
+                "slab_um": 0.09,
+                "w_ring_um": 0.48,
+                "w_bus_um": 0.44,
+                "r_um": 20.0,
+                "gap_um": 0.20,
+                "mechanism": "si_pn_depletion",
+                "biases": [0.0, -2.0, -5.0],
+                "export_interconnect": True,
+            },
+        },
+    })
+    assert mcp_tune is not None and not mcp_tune["result"]["isError"]
+    t_txt = mcp_tune["result"]["content"][0]["text"]
+    assert len(t_txt) < 620, f"MCP active_tuning too verbose ({len(t_txt)} chars): {t_txt}"
+    t_json = json.loads(t_txt)
+    assert Path(t_json["csv"]).is_file() and Path(t_json["interconnect_zip"]).is_file()
+
+
 def main() -> None:
     tests = [
         ("Materials & Hardware Probe", test_materials_and_hardware),
@@ -568,9 +739,10 @@ def main() -> None:
         ("Token-Minimal Codex/Claude Agent CLI & MCP Server", test_agent_tools_and_mcp_minimal_tokens),
         ("Multi-Waveband Physics (Visible 532nm / O-Band 1310nm / Mid-IR 4.2um)", test_multiband_vis_1310_midir_and_warnings),
         ("Cleanroom Lithography Positive/Negative PR Dose & OPC Bias GDS", test_fabrication_dose_and_pr_tolerance),
+        ("2D-FEM TO/EO/Si-PN Active Tuning, T/E/V/I Spectra & Lumerical INTERCONNECT", test_active_tuning_2d_fem_and_interconnect),
     ]
     print("=" * 72)
-    print("Running OpenMRR Studio v3.3.0 Full Verification Suite")
+    print("Running OpenMRR Studio v3.4.0 Full Verification Suite")
     print("=" * 72)
     for label, fn in tests:
         print(f"[RUN ] {label} ...", flush=True)

@@ -23,6 +23,10 @@ import urllib.request
 
 import numpy as np
 
+from .active_tuning import (
+    export_lumerical_interconnect_bundle,
+    run_active_tuning_analysis,
+)
 from .fab_tolerance import export_fab_bias_array_gds, run_fabrication_error_analysis
 from .gds_bridge import (
     analyze_uploaded_gds,
@@ -623,9 +627,9 @@ def parse_photonics_intent(message: str) -> dict:
         if 55.0 <= ang <= 90.0:
             out["fields"]["sidewall_deg"] = ang
 
-    # 6. Sweep Commands
+    # 6. Sweep Commands (passive geometry / loss sweeps)
     sweep_match = re.search(
-        r"(?:sweep|scan|vary|扫描|扫参|扫)\s*(?:propagation\s*|传播)?(width|w\b|gap|loss|alpha|pulley|angle|theta|length|straight|l_s|radius|r\b|temp|temperature|voltage|bias|波导宽度|宽度|间距|损耗|包角|角度|直波导|耦合长度|半径|温度|电压)",
+        r"(?:sweep|scan|vary|扫描|扫参|扫)\s*(?:propagation\s*|传播)?(width|w\b|gap|loss|alpha|pulley|angle|theta|length|straight|l_s|radius|r\b|波导宽度|宽度|间距|损耗|包角|角度|直波导|耦合长度|半径)",
         low,
     )
     if sweep_match or re.search(r"single[-_\s]*mode\s*(?:check|sweep|cutoff|width)|单模(?:分析|截止|检查)", low):
@@ -799,6 +803,67 @@ def parse_photonics_intent(message: str) -> dict:
             "resist_tone": resist_tone,
             "max_dose_error_pct": float(pct_m.group(1)) if pct_m else 15.0,
             "max_cd_bias_nm": float(nm_m.group(1)) if nm_m else 30.0,
+        }
+    elif re.search(
+        r"\binterconnect\b|compact[-_\s]*model|sparams?\b|s[-_\s]*param|\.icp\b|导出\s*interconnect|"
+        r"tuning[-_\s]*(?:eff|spec|slope|curve|analys)|active[-_\s]*tuning|\bpn[-_\s]*junction\b|\bsi[-_\s]*pn\b|"
+        r"\bpin[-_\s]*(?:diode|junction|inject)|\bpockels\b|thermo[-_\s]*optic|micro[-_\s]*heater|\btin\s*heater\b|"
+        r"e[-_\s]*field|electric[-_\s]*field|"
+        r"(?:different|multi(?:ple)?|vary|sweep|scan)\s*(?:voltage|bias|current|temp(?:erature)?|power|e[-_\s]*field)|"
+        r"(?:voltage|current|temperature|heater|eo|to)\s*(?:spectra|spectrum|tuning|sweep)|"
+        r"\bv_?pi\b|\bp_?pi\b|调谐效率|调谐光谱|有源调谐|不同电压|不同电流|不同温度|多电压|多电流|温度光谱|电场|pn\s*结|pin\s*结|热光调谐|电光调谐|微加热器|扫描电压|扫描温度|扫描电流",
+        low,
+    ):
+        want_ic = bool(
+            re.search(r"\binterconnect\b|compact[-_\s]*model|sparams?\b|s[-_\s]*param|\.icp\b|导出\s*interconnect", low)
+        )
+        out["action"] = "export_interconnect" if want_ic else "active_tuning"
+        out["fields"].pop("delta_temp_k", None)
+        out["fields"].pop("voltage_v", None)
+
+        mech_det = "auto"
+        if re.search(r"\bpin\b|injection|注入", low):
+            mech_det = "si_pin_injection"
+        elif re.search(r"\bpn\b|depletion|耗尽", low):
+            mech_det = "si_pn_depletion"
+        elif re.search(r"\bpockels\b|electro[-_\s]*optic|\beo\b|e[-_\s]*field|electric[-_\s]*field|电光|电场", low):
+            mech_det = "pockels_eo"
+        elif re.search(r"thermo[-_\s]*optic|heater|\btin\b|热光|加热|温升|温度", low):
+            mech_det = "thermo_optic"
+
+        drv_det = "auto"
+        if re.search(r"v\s*/\s*(?:um|µm)|e[-_\s]*field|electric[-_\s]*field|电场", low):
+            drv_det = "e_field_v_per_um"
+        elif re.search(r"current|\bma\b|电流", low):
+            drv_det = "current_ma"
+        elif re.search(r"power|\bmw\b|功率", low):
+            drv_det = "power_mw"
+        elif re.search(r"delta_?t|\bdt\b|temperature|\btemp\b|温度|温升", low) and not re.search(r"heater|加热|\bma\b|\bmw\b|\bv\b", low):
+            drv_det = "delta_temp_k"
+        elif re.search(r"voltage|volt|\bv\b|电压", low):
+            drv_det = "voltage_v"
+
+        # Parse optional explicit comma-separated bias list (e.g. "0, -2, -5 V" or "0, 20, 50 K")
+        bias_list: list[float] | None = None
+        list_m = re.search(
+            r"(-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?){1,8})\s*(?:v\s*/\s*(?:um|µm)|ma|mw|k|°c|v\b)?",
+            low,
+        )
+        if list_m:
+            bias_list = [float(x.strip()) for x in list_m.group(1).split(",") if x.strip()]
+
+        box_m = re.search(r"\bbox\b\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:um|µm)", low)
+        hgap_m = re.search(r"heater[-_\s]*gap\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:um|µm)", low)
+        egap_m = re.search(r"(?:eo|electrode)[-_\s]*gap\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:um|µm)", low)
+
+        out["tuning"] = {
+            "mechanism": mech_det,
+            "drive_type": drv_det,
+            "bias_values": bias_list,
+            "export_interconnect": want_ic,
+            "box_thickness_um": float(box_m.group(1)) if box_m else 2.0,
+            "heater_gap_um": float(hgap_m.group(1)) if hgap_m else 0.90,
+            "electrode_gap_um": float(egap_m.group(1)) if egap_m else None,
         }
     elif re.search(r"(?:export|create|save|generate|download)\b.*(?:\.?\bgds\b|layout|mask)|(?:生成|导出|创建).*(?:gds|版图)", low):
         out["action"] = "export_single_gds"
@@ -1778,6 +1843,134 @@ def _process_chat_turn_core(
         }
 
     # ------------------------------------------------------------------
+    # Direct Action 2C: 2D-FEM TO / EO / Si-PN Active Tuning & Lumerical INTERCONNECT Export
+    # ------------------------------------------------------------------
+    if intent["action"] in ("active_tuning", "export_interconnect"):
+        t_opts = intent.get("tuning") or {}
+        mech_req = str(t_opts.get("mechanism") or "auto")
+        if mech_req in ("si_pn_depletion", "si_pin_injection") and cfg.core_material != "Si":
+            # Auto-switch platform to SOI if user explicitly requested Si PN/PIN from default Si3N4
+            preset = PLATFORM_PRESETS["Si"]
+            cfg_dict.update({
+                "core_material": "Si",
+                "film_height_um": preset["film_height_um"],
+                "slab_height_um": 0.09,
+                "ring_width_um": preset["ring_width_um"],
+                "bus_width_um": preset["bus_width_um"],
+                "ring_radius_um": preset["ring_radius_um"],
+                "gap_thru_um": preset["gap_thru_um"],
+                "gap_drop_um": preset["gap_drop_um"],
+            })
+            session["config"] = cfg_dict
+            cfg = _dict_to_cfg(cfg_dict)
+
+        tune_res = run_active_tuning_analysis(
+            cfg,
+            mechanism=mech_req,
+            drive_type=str(t_opts.get("drive_type") or "auto"),
+            bias_values=t_opts.get("bias_values"),
+            box_thickness_um=float(t_opts.get("box_thickness_um") or 2.0),
+            heater_gap_um=float(t_opts.get("heater_gap_um") or 0.90),
+            electrode_gap_um=t_opts.get("electrode_gap_um"),
+        )
+        eff = tune_res["efficiency"]
+        gp = tune_res["geometry_physics"]
+        mech_used = eff["mechanism"]
+        session["last_tuning_result"] = tune_res
+        session["wizard_step"] = 6
+        session["ui_view"] = "tuning"
+
+        ic_res = None
+        if intent["action"] == "export_interconnect" or t_opts.get("export_interconnect"):
+            out_dir = Path(gds_export_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            safe_mat = str(cfg.core_material).replace("-", "")
+            ic_res = export_lumerical_interconnect_bundle(
+                cfg, tune_res, out_dir / f"interconnect_{safe_mat}_{mech_used}", make_zip=True
+            )
+
+        if mech_used == "thermo_optic":
+            geom_line_en = (
+                f"2D Fourier FEM: `R_th = {gp.get('r_th_core_k_per_mw', '--')} K/mW`, "
+                f"`R_elec = {gp.get('heater_resistance_ohm', '--')} Ω`, `BOX = {gp.get('box_thickness_um', 2.0)} µm`"
+            )
+            geom_line_zh = (
+                f"2D 热传导有限元：`R_th = {gp.get('r_th_core_k_per_mw', '--')} K/mW`，"
+                f"`R_elec = {gp.get('heater_resistance_ohm', '--')} Ω`，`BOX = {gp.get('box_thickness_um', 2.0)} µm`"
+            )
+        elif mech_used == "pockels_eo":
+            geom_line_en = (
+                f"2D Laplace FEM: `E_x = {gp.get('ex_core_v_per_um_per_v', '--')} (V/µm)/V`, "
+                f"`C_elec = {gp.get('c_elec_ff_per_um', '--')} fF/µm`, `G = {gp.get('electrode_gap_um', '--')} µm`"
+            )
+            geom_line_zh = (
+                f"2D 静电场有限元：`E_x = {gp.get('ex_core_v_per_um_per_v', '--')} (V/µm)/V`，"
+                f"`C_elec = {gp.get('c_elec_ff_per_um', '--')} fF/µm`，电极间距 `G = {gp.get('electrode_gap_um', '--')} µm`"
+            )
+        else:
+            geom_line_en = (
+                f"2D Si Junction + Maxwell FEM: `W_dep(0V) = {gp.get('w_dep_0v_nm', '--')} nm`, "
+                f"`C_j(0V) = {gp.get('cj_0v_ff_per_um', '--')} fF/µm`, `R_s = {gp.get('r_series_ohm', '--')} Ω`"
+            )
+            geom_line_zh = (
+                f"2D 硅结耗尽/注入 + 本征模有限元：`W_dep(0V) = {gp.get('w_dep_0v_nm', '--')} nm`，"
+                f"`C_j(0V) = {gp.get('cj_0v_ff_per_um', '--')} fF/µm`，串联电阻 `R_s = {gp.get('r_series_ohm', '--')} Ω`"
+            )
+
+        if zh:
+            msg = (
+                f"⚡ **已完成纯自研 2D-FEM 多物理场有源调谐与多态光谱计算（零 COMSOL 依赖）**\n"
+                f"- **平台与机制**：`{cfg.core_material}` · `{gp['mechanism_name_zh']}`（输入激励：`{gp['drive_type']}`，共 `{len(tune_res['states'])}` 个状态）\n"
+                f"- **器件调谐斜率**：**`{eff['wavelength_slope']} {eff['wavelength_slope_unit']}`**（`{eff['freq_slope']} {eff['freq_slope_unit']}`）\n"
+                f"- **π 相移品质因数**：**`{eff['pi_figure_label']} = {eff['pi_figure']} {eff['pi_figure_unit']}`**｜**3-dB 调制带宽**：**`{eff['bandwidth_3db']} {eff['bandwidth_unit']}`**\n"
+                f"- **几何截面耦合参数**：{geom_line_zh}"
+            )
+            if ic_res:
+                msg += (
+                    f"\n- 📦 **已生成 Ansys Lumerical INTERCONNECT 紧凑模型包**：`{ic_res['zip_name']}`"
+                    f"（含无源 S 参数 `.dat`、有源复折射率表 `.txt`、电路自动生成 `.lsf` 与 `lumapi` 脚本，无源性校验 = `{ic_res['passivity_verified']}`）"
+                )
+            chips = [
+                {"label": "📦 导出 Lumerical INTERCONNECT 模型包 (.ZIP)", "prompt": "导出 Lumerical INTERCONNECT 紧凑模型"},
+                {"label": "🌡️ 按直接温度 ΔT (0, 20, 50 K) 计算光谱", "prompt": "温度光谱 0, 20, 50 K"},
+                {"label": "⚡ 按直接电场 E (-10, 0, 10 V/um) 计算光谱", "prompt": "电场调谐光谱 -10, 0, 10 V/um"},
+                {"label": "📊 返回无源微环光谱", "prompt": "开始仿真"},
+            ]
+        else:
+            msg = (
+                f"⚡ **Completed Native 2D-FEM Active Tuning & Multi-State Spectra (Zero COMSOL)**\n"
+                f"- **Platform & Mechanism**: `{cfg.core_material}` · `{gp['mechanism_name_en']}` (Drive: `{gp['drive_type']}`, `{len(tune_res['states'])}` states)\n"
+                f"- **Device Tuning Efficiency**: **`{eff['wavelength_slope']} {eff['wavelength_slope_unit']}`** (`{eff['freq_slope']} {eff['freq_slope_unit']}`)\n"
+                f"- **π-Phase-Shift Figure**: **`{eff['pi_figure_label']} = {eff['pi_figure']} {eff['pi_figure_unit']}`** | **3-dB Bandwidth**: **`{eff['bandwidth_3db']} {eff['bandwidth_unit']}`**\n"
+                f"- **Cross-Section Geometry Coupling**: {geom_line_en}"
+            )
+            if ic_res:
+                msg += (
+                    f"\n- 📦 **Exported Ansys Lumerical INTERCONNECT Compact Model**: `{ic_res['zip_name']}` "
+                    f"(`SPAR .dat` + `OMM n_eff .txt` + `.lsf` circuit + `lumapi` runner; passivity verified = `{ic_res['passivity_verified']}`)"
+                )
+            chips = [
+                {"label": "📦 Export Lumerical INTERCONNECT (.ZIP)", "prompt": "Export Lumerical INTERCONNECT compact model"},
+                {"label": "🌡️ Direct ΔT Spectra (0, 20, 50 K)", "prompt": "Temperature tuning spectra at 0, 20, 50 K"},
+                {"label": "⚡ Direct E-Field Spectra (-10, 0, 10 V/um)", "prompt": "E-field tuning spectra at -10, 0, 10 V/um"},
+                {"label": "📊 Back to Passive MRR Spectrum", "prompt": "Simulate current MRR"},
+            ]
+
+        session["history"] = (history + [{"role": "assistant", "content": msg}])[-16:]
+        ret_payload = {
+            "session": session,
+            "assistant_message": msg,
+            "chips": chips,
+            "tuning_result": tune_res,
+            "ui_view": "tuning",
+            "wizard_step": 6,
+            "active_tab": "tab-tuning",
+        }
+        if ic_res is not None:
+            ret_payload["interconnect_export"] = ic_res
+        return ret_payload
+
+    # ------------------------------------------------------------------
     # Guided Step 3 -> Step 4 Pre-Check: Material chosen, ask to confirm Wafer Stack
     # ------------------------------------------------------------------
     if (
@@ -1786,7 +1979,15 @@ def _process_chat_turn_core(
         and session.get("last_width_sweep") is None
         and "resonator_size" not in confirmed
         and "topology" not in confirmed
-        and intent["action"] not in ("sweep_width", "simulate_mrr", "sweep_mrr", "fab_tolerance", "export_fab_bias_gds")
+        and intent["action"] not in (
+            "sweep_width",
+            "simulate_mrr",
+            "sweep_mrr",
+            "fab_tolerance",
+            "export_fab_bias_gds",
+            "active_tuning",
+            "export_interconnect",
+        )
         and "uploaded_gds" not in confirmed
     ):
         session["stage"] = "ask_stack"
@@ -2149,6 +2350,7 @@ def _process_chat_turn_core(
     chips = (
         [
             {"label": f"⚡ 一键应用临界耦合 ({cc['recommended_value']} {cc['unit']})", "prompt": "临界耦合"},
+            {"label": "🎛️ 有源调谐光谱 (V / I / ΔT / E) + INTERCONNECT", "prompt": "计算有源调谐效率与不同电压电流光谱"},
             {"label": "🧪 正/负胶过曝与欠曝容差分析", "prompt": "正胶 ±15% 过曝与欠曝工艺误差分析"},
             {"label": "💾 导出单器件 .GDS + .LYP", "prompt": "导出单个 GDS 版图"},
             {"label": "🗂️ 导出 5 环扫描阵列 .GDS", "prompt": "导出阵列 GDS 版图"},
@@ -2158,6 +2360,7 @@ def _process_chat_turn_core(
         if zh
         else [
             {"label": f"⚡ Apply Critical Coupling ({cc['recommended_value']} {cc['unit']})", "prompt": "Apply critical coupling"},
+            {"label": "🎛️ Active Tuning (V / I / ΔT / E) + INTERCONNECT", "prompt": "Calculate tuning efficiency and multi-bias spectra"},
             {"label": "🧪 Fab Error (Over/Under-Dose PR)", "prompt": "Analyze positive PR ±15% over-dose and under-dose"},
             {"label": "💾 Export Single .GDS + .LYP", "prompt": "Export single GDS layout"},
             {"label": "🗂️ Export 5-Ring Sweep Array .GDS", "prompt": "Export 5-ring parameter sweep array GDS"},

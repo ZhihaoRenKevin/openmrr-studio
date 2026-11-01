@@ -30,6 +30,9 @@ Most photonics students and engineers face two painful bottlenecks when designin
 - **Bidirectional GDSII / OASIS Bridge**:
   - **Upload `.gds` / `.oas` $\rightarrow$ Simulate**: Drop any microring `.gds` file into the app. OpenMRR merges core polygons (`gdstk` + `shapely`), detects whether the layout is a **Point-Coupled Circle**, **Racetrack**, **Concentric Pulley**, or **Dual-Ring Vernier**, measures `R`, `W_ring`, `W_bus`, `gap_thru`, `gap_drop`, `L_s`, and `pulley_angle` directly from the polygons, renders an interactive 2D GDS caliper viewer, and simulates the optical spectrum once you confirm the wafer thickness.
   - **Design / Sweep $\rightarrow$ Create `.gds` + KLayout `.lyp`**: Export either a single annotated resonator cell (with optical port pins `65/0`, TiN heater `10/0`, GSG pads `11/0`) or a multi-device **MPW parameter-sweep array `.gds`** plus a matching KLayout `.lyp` color file.
+- **Native 2D-FEM Active Tuning (`TO` / `EO` / `Si PN-PIN`) & Ansys Lumerical INTERCONNECT Export (`⚡ Tuning & IC`, Zero COMSOL)**:
+  - Solves cross-section multiphysics directly in pure Python (`scikit-fem`) without COMSOL: **2D Fourier heat conduction** ($-\nabla\cdot(\kappa_{\mathrm{th}}\nabla \Delta T)=Q_{\mathrm{vol}}$ across `TiN`/`Pt`/`W` microheaters and `BOX` oxide thickness), **2D anisotropic Laplace electrostatics** ($-\nabla\cdot(\varepsilon_0\boldsymbol{\varepsilon}_{\mathrm{DC}}\nabla\phi)=0$ across coplanar `GSG` or vertical electrodes with dielectric screening), and **2D Silicon PN depletion / PIN injection** (Debye-screened carriers, Soref-Bennett complex $\Delta n + i\Delta k$, junction capacitance $C_j(V)$, and slab resistance $R_s$).
+  - Feeds spatial $\tilde{n}(x,y) = n_0 + \Delta n(x,y) + i(k_0 + \Delta k(x,y))$ directly into the **2D conformal vector Maxwell eigenmode solver** across arbitrary **Voltage (`V`), Current (`mA`), Heater Power (`mW`), Temperature Shift (`ΔT [K]`), or Electric Field (`E [V/µm]`)** inputs, extracting $V_\pi L$, $P_\pi$, $f_{3\mathrm{dB}}$, multi-state spectra, and exporting turnkey **Ansys Lumerical INTERCONNECT** compact-model `.zip` bundles (`SPAR .dat`, `OMM n_eff .txt`, `.lsf`, and `lumapi` runner).
 - **Cleanroom Lithography Dose & Photoresist Polarity Error Analysis (`🧪 Fab & Dose`)**:
   - Evaluates realistic **Over-Dose** and **Under-Dose** fabrication errors for both **Positive Photoresist** (`ZEP520A`, `CSAR 62`, `PMMA`, `KrF/ArF DUV`, where over-dose shrinks core width $W - |\Delta\mathrm{CD}|$, widens gap $g + \eta|\Delta\mathrm{CD}|$, shifts toward under-coupling, and blue-shifts resonance) and **Negative Photoresist** (`HSQ`, `ma-N 2403`, `SU-8`, or lift-off, where over-dose blooms core width $W + \Delta\mathrm{CD}$, shrinks gap $g - \eta\Delta\mathrm{CD}$ with proximity gap-bridging alerts, shifts toward over-coupling, and red-shifts resonance).
   - Extracts the **`ER >= 15 dB` CD & Exposure Dose Yield Window**, resonance sensitivity `dλ/dCD [pm/nm]`, TiN heater $\Delta T$ trim budget, and exports a **5-Cell Pre-Biased Compensation `.GDS` Array** (`ΔCD_drawn = [-20, -10, 0, +10, +20] nm`) so at least one cell on-wafer hits critical coupling despite dose drift.
@@ -64,8 +67,8 @@ Download the pre-built desktop installer from [**GitHub Releases**](https://gith
 
 | Operating System | Download Package | How to Install & Open |
 | :--- | :--- | :--- |
-| **macOS (Apple Silicon)** | [**`OpenMRR-Studio-v3.3.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | Open the `.dmg` and drag **`OpenMRR Studio.app`** into **`Applications`**. *(On first launch of an unsigned open-source app, right-click **`OpenMRR Studio.app`** $\rightarrow$ **Open**, or allow under **System Settings $\rightarrow$ Privacy & Security**.)* |
-| **Windows 10 / 11 (64-bit)** | **`OpenMRR-Studio-v3.3.0-Windows-Setup-x64.exe`** *(or Portable `.zip`)* | Double-click **`Setup.exe`** (no Admin password needed; creates Desktop & Start Menu shortcuts), or unzip the Portable `.zip` and run **`OpenMRR Studio.exe`**. *(If building from source on Windows, see Option 3 below: 1 double-click on `launchers\OpenMRR_Windows.bat`.)* |
+| **macOS (Apple Silicon)** | [**`OpenMRR-Studio-v3.4.0-macOS-AppleSilicon.dmg`**](https://github.com/ZhihaoRenKevin/openmrr-studio/releases/latest) | Open the `.dmg` and drag **`OpenMRR Studio.app`** into **`Applications`**. *(On first launch of an unsigned open-source app, right-click **`OpenMRR Studio.app`** $\rightarrow$ **Open**, or allow under **System Settings $\rightarrow$ Privacy & Security**.)* |
+| **Windows 10 / 11 (64-bit)** | **`OpenMRR-Studio-v3.4.0-Windows-Setup-x64.exe`** *(or Portable `.zip`)* | Double-click **`Setup.exe`** (no Admin password needed; creates Desktop & Start Menu shortcuts), or unzip the Portable `.zip` and run **`OpenMRR Studio.exe`**. *(If building from source on Windows, see Option 3 below: 1 double-click on `launchers\OpenMRR_Windows.bat`.)* |
 
 *(Exported `.gds` masks, `.lyp` color maps, and `.csv` spectra from the standalone desktop app are saved locally in `~/Documents/OpenMRR_Studio/`.)*
 
@@ -189,6 +192,9 @@ python examples/01_devices_and_sweeps/03_multiband_vis_1310_midir.py
 # 3c. Lithography over-dose / under-dose (Positive PR vs Negative PR) & 5-cell pre-biased .GDS:
 python examples/01_devices_and_sweeps/04_lithography_dose_pr_tolerance.py
 
+# 3d. Native 2D-FEM TO/EO/Si-PN active tuning (V / I / dT / E) & Lumerical INTERCONNECT export:
+python examples/01_devices_and_sweeps/05_active_tuning_pn_eo_to_interconnect.py
+
 # 4. Create single-device & 5-ring MPW sweep array .GDS + KLayout .lyp:
 python examples/02_gds_roundtrip/01_create_mrr_and_sweep_array_gds.py
 
@@ -198,7 +204,7 @@ python examples/02_gds_roundtrip/02_upload_and_simulate_gds.py
 # 6. Fit CW/CCW split-doublet & multi-FSR experimental spectra via CMT:
 python examples/03_lab_spectrum_fitting/01_fit_doublet_and_multifsr.py
 
-# Run all 10 automated verification suites:
+# Run all 11 automated verification suites:
 python tests/test_openmrr_all.py
 ```
 
@@ -255,7 +261,10 @@ OpenMRR Studio ships with drop-in [`AGENTS.md`](./AGENTS.md), [`.mcp.json`](./.m
 uv run openmrr agent design --top pulley_ap --mat 4H-SiC --h 0.60 --w-ring 1.10 --w-bus 0.82 --fsr 150 --gap 0.24 --cc --gds
 
 # Lithography over-dose / under-dose (Positive PR vs Negative PR) + 5-cell pre-biased .GDS (<140 tokens):
-uv run openmrr agent fab-tolerance --mat Si --h 0.22 --w-ring 0.48 --w-bus 0.45 --r 15 --gap 0.18 --resist positive_pr --dose 15 --bias-gds
+uv run openmrr agent fab-tolerance --mat Si --h 0.22 --w-ring 0.48 --w-bus 0.45 --r 15 --gap 0.18 --resist positive_pr --dose-pct 15 --bias-gds
+
+# 2D-FEM Si PN / Pockels EO / TO active tuning + Lumerical INTERCONNECT export (<145 tokens):
+uv run openmrr agent active-tuning --mat Si --h 0.22 --slab 0.09 --w-ring 0.48 --w-bus 0.44 --r 20 --mech si_pn_depletion --biases "0,-2,-5" --interconnect
 ```
 
 ---
@@ -274,6 +283,7 @@ openmrr-studio/
 │   ├── eigenmode_solver.py                2D full-vector Nedelec1/Lagrange FEM (bent + straight) & FDE
 │   ├── mrr_cmt_spatial.py                 Cylindrical vector overlap & pulley spatial CMT integrator
 │   ├── mrr_topologies.py                  7 MRR topologies, critical-coupling solver, EO/TO tuning & GDS
+│   ├── active_tuning.py                   2D-FEM TO/EO/Si-PN active tuning & Lumerical INTERCONNECT export
 │   ├── fab_tolerance.py                   Positive/Negative PR over/under-dose & CD-bias error analyzer
 │   ├── sweeps.py                          Single-mode width cutoff sweep & MRR parameter sweep engine
 │   ├── gds_bridge.py                      Bidirectional GDS/OAS polygon analyzer, sweep arrays & .lyp
@@ -284,10 +294,10 @@ openmrr-studio/
 │   ├── ui_frontend.py                     Zero-CDN Retina 2x Canvas + SVG split-screen workbench
 │   ├── desktop_app.py  cli.py             Native pywebview launcher & `openmrr` CLI
 │   └── build_standalone.py                PyInstaller packager for macOS .dmg & Windows Setup .exe
-├── examples/                              8 self-contained cookbook scripts (Visible -> 1310/1550 -> Mid-IR)
+├── examples/                              9 self-contained cookbook scripts (Visible -> 1310/1550 -> Mid-IR)
 ├── benchmarks/                            FEM vs Yee-FDE audit, Lumerical runner & hero figure generator
 ├── docs/                                  Chinese README, tutorials, benchmarks, contributing & llms.txt
-└── tests/                                 10-suite automated verification tests
+└── tests/                                 11-suite automated verification tests
 ```
 
 ---

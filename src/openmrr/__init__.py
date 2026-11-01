@@ -1,9 +1,19 @@
 """OpenMRR Studio (`openmrr`) — License-Free Photonics Eigenmode, CMT & GDSII Suite."""
 from __future__ import annotations
 
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 
+from .active_tuning import (
+    HEATER_METAL_CATALOG,
+    TUNING_MECHANISM_CATALOG,
+    export_lumerical_interconnect_bundle,
+    run_active_tuning_analysis,
+    solve_2d_electrostatic_eo_fem,
+    solve_2d_heater_thermal_fem,
+    soref_bennett_si_dn_dk,
+)
 from .agent_tools import (
+    agent_active_tuning,
     agent_design_mrr,
     agent_fab_tolerance,
     agent_fit_spectrum,
@@ -24,6 +34,7 @@ from .eigenmode_solver import (
     WaveguideCrossSectionSpec,
     solve_modes_fde_tidy3d,
     solve_modes_fem,
+    solve_perturbed_neff_sweep_fem,
 )
 from .fab_tolerance import (
     RESIST_TONE_CATALOG,
@@ -63,16 +74,19 @@ from .sweeps import run_mrr_parameter_sweep, run_waveguide_width_sweep
 
 __all__ = [
     "__version__",
+    "HEATER_METAL_CATALOG",
     "MATERIAL_CATALOG",
     "OPENMRR_LAYERS",
     "RESIST_TONE_CATALOG",
     "TOPOLOGY_CATALOG",
+    "TUNING_MECHANISM_CATALOG",
     "T_REF_K",
     "WAVEBAND_PRESETS",
     "CMTFitSummary",
     "EigenmodeResult",
     "MRRDesignConfig",
     "WaveguideCrossSectionSpec",
+    "agent_active_tuning",
     "agent_design_mrr",
     "agent_fab_tolerance",
     "agent_fit_spectrum",
@@ -87,6 +101,7 @@ __all__ = [
     "detect_hardware_profile",
     "evaluate_material_dispersion_table",
     "export_fab_bias_array_gds",
+    "export_lumerical_interconnect_bundle",
     "export_mrr_gds",
     "export_sweep_array_gds",
     "fit_multi_resonance_spectrum",
@@ -96,14 +111,19 @@ __all__ = [
     "parse_photonics_intent",
     "process_chat_turn",
     "q_int_to_loss_db_per_cm",
+    "run_active_tuning_analysis",
     "run_compute_benchmark",
     "run_fabrication_error_analysis",
     "run_mrr_parameter_sweep",
     "run_waveguide_width_sweep",
     "scale_preset_for_wavelength",
     "simulate_mrr_topology",
+    "solve_2d_electrostatic_eo_fem",
+    "solve_2d_heater_thermal_fem",
     "solve_modes_fde_tidy3d",
     "solve_modes_fem",
+    "solve_perturbed_neff_sweep_fem",
+    "soref_bennett_si_dn_dk",
     "tmm_broadband_mrr_spectrum",
     "write_klayout_layer_props",
 ]
